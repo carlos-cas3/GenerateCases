@@ -1,5 +1,5 @@
-import { getDocumentBaseName, isSameDocument } from '../../history/utils/comparison';
-import type { ExecutionRecord } from '../../history/types';
+import { getDocumentBaseName, isSameDocument } from '@/features/history';
+import type { ExecutionRecord } from '@/features/history';
 
 /** Orden estable para el listado: por nombre y, dentro de un documento, la más reciente primero. */
 function byDocumentThenDate(a: ExecutionRecord, b: ExecutionRecord) {
