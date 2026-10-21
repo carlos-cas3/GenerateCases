@@ -58,7 +58,7 @@ export function GenerationPage() {
     await generation.start({ file, semanticGrouping });
   };
 
-  const handleViewDetails = (_executionId: string) => {
+  const handleViewDetails = (/**_executionId: string*/) => {
     // TODO: navegar al detalle de la ejecución.
   };
 
