@@ -1,4 +1,4 @@
-import type { BetterWhen } from '../../shared/utils/metricFormat';
+import type { BetterWhen } from '@/shared/utils/metricFormat';
 
 export type MetricIconKey = 'coverage' | 'redundancy' | 'quality' | 'generic';
 
