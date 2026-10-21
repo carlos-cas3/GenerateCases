@@ -22,7 +22,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import SearchOffOutlinedIcon from '@mui/icons-material/SearchOffOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { BaseCard } from '../../../components/cards';
-import { StatusChip } from '../../../shared/execution/StatusChip';
+import { StatusChip } from '../../../shared/components/StatusChip';
 import { formatDateTime } from '../../../shared/utils/formatDateTime';
 import { HISTORY_STATUS_LABEL, PAGE_SIZE_OPTIONS } from '../constants';
 import type { PageSize } from '../constants';

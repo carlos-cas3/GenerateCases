@@ -3,7 +3,7 @@ import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { StatusChip } from '../../../shared/execution/StatusChip';
+import { StatusChip } from '../../../shared/components/StatusChip';
 import { formatDateTime } from '../../../shared/utils/formatDateTime';
 import { HISTORY_STATUS_LABEL } from '../../history/constants';
 import type { ExecutionRecord } from '../../history/types';

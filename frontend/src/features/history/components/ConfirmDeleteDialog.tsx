@@ -9,7 +9,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
-import { DIALOG_BACKDROP_SX, DIALOG_PAPER_SX } from '../../../components/dialogs/dialogStyles';
+import { DIALOG_BACKDROP_SX, DIALOG_PAPER_SX } from '../../../shared/components/dialogStyles';
 import type { ExecutionRecord } from '../types';
 
 export interface ConfirmDeleteDialogProps {

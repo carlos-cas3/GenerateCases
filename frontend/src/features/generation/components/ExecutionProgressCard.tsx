@@ -11,7 +11,7 @@ import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import { BaseCard } from '../../../components/cards';
 import type { ExecutionStage, ExecutionStatus } from '../types';
-import { StatusChip } from '../../../shared/execution/StatusChip';
+import { StatusChip } from '../../../shared/components/StatusChip';
 import { StatusIcon, toneColor, STATUS_CONFIG } from '../../../shared/execution/statusConfig';
 
 export interface ExecutionProgressCardProps {

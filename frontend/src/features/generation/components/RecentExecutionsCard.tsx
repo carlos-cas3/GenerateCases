@@ -9,7 +9,7 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import { BaseCard } from '../../../components/cards';
 import type { RecentExecution } from '../types';
 import { formatDateTime } from '../../../shared/utils/formatDateTime';
-import { StatusChip } from '../../../shared/execution/StatusChip';
+import { StatusChip } from '../../../shared/components/StatusChip';
 
 export interface RecentExecutionsCardProps {
   executions: RecentExecution[];
