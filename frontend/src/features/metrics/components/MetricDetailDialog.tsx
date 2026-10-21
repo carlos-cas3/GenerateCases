@@ -8,7 +8,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import Typography from '@mui/material/Typography';
-import { DIALOG_BACKDROP_SX, DIALOG_PAPER_SX } from '../../../components/dialogs/dialogStyles';
+import { DIALOG_BACKDROP_SX, DIALOG_PAPER_SX } from '@/shared/components/dialogStyles';
 import type { MetricInfo } from '../types';
 import { MetricIconBadge } from './MetricIconBadge';
 

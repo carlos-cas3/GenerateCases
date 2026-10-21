@@ -1,4 +1,4 @@
-import type { ExecutionStatus } from '../../shared/execution/types';
+import type { ExecutionStatus } from '@/shared/types';
 
 export interface ExecutionRecord {
   id: string;

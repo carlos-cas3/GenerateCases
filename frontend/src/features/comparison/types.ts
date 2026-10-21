@@ -1,4 +1,4 @@
-import type { BetterWhen, ValueUnit } from '../../shared/utils/metricFormat';
+import type { BetterWhen, ValueUnit } from '@/shared/utils/metricFormat';
 
 /** Ejecuciones elegidas, guardadas por id. A = con clustering, B = sin clustering. */
 export interface ComparisonSelection {

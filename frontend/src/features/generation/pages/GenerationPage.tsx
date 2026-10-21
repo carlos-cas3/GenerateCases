@@ -1,11 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
 import Typography from '@mui/material/Typography';
 import { DocumentUploadCard } from '../components/DocumentUploadCard';
 import { ExecutionProgressCard } from '../components/ExecutionProgressCard';
 import { RecentExecutionsCard } from '../components/RecentExecutionsCard';
-import { buildMockStages, MOCK_RECENT_EXECUTIONS } from '../mocks/generationMocks';
+import { useExecutionProgress } from '../hooks/useExecutionProgress';
+import { useRecentExecutions } from '../hooks/useRecentExecutions';
+import { useStartGeneration } from '../hooks/useStartGeneration';
+import { getStageDefinitions } from '../utils/stageDefinitions';
 
 /**
  * ÚNICO lugar donde se decide la distribución.
@@ -37,14 +40,22 @@ const LAYOUTS = {
 
 const ACTIVE_LAYOUT: keyof typeof LAYOUTS = 'twoColumns';
 
+const RECENT_EXECUTIONS_LIMIT = 3;
+/** La primera etapa arranca expandida. */
+const DEFAULT_EXPANDED_IDS = [getStageDefinitions(true)[0].id];
+
 export function GenerationPage() {
   const [file, setFile] = useState<File | null>(null);
   const [semanticGrouping, setSemanticGrouping] = useState(true);
 
-  const stages = useMemo(() => buildMockStages(semanticGrouping, 'running'), [semanticGrouping]);
+  const progress = useExecutionProgress(semanticGrouping);
+  const recent = useRecentExecutions(RECENT_EXECUTIONS_LIMIT);
+  const generation = useStartGeneration();
 
-  const handleSubmit = () => {
-    // TODO: iniciar la ejecución en el backend con { file, semanticGrouping }.
+  const handleSubmit = async () => {
+    if (!file) return;
+    // TODO: tras iniciar la ejecución, reflejarla en el progreso y en las ejecuciones recientes.
+    await generation.start({ file, semanticGrouping });
   };
 
   const handleViewDetails = (_executionId: string) => {
@@ -79,12 +90,23 @@ export function GenerationPage() {
           semanticGrouping={semanticGrouping}
           onSemanticGroupingChange={setSemanticGrouping}
           onSubmit={handleSubmit}
+          isSubmitting={generation.isSubmitting}
+          errorMessage={generation.error}
         />
-        <ExecutionProgressCard sx={{ gridArea: 'progress' }} stages={stages} defaultExpandedIds={[stages[0].id]} />
+        <ExecutionProgressCard
+          sx={{ gridArea: 'progress' }}
+          stages={progress.stages}
+          isLoading={progress.isLoading}
+          errorMessage={progress.error}
+          defaultExpandedIds={DEFAULT_EXPANDED_IDS}
+        />
         <RecentExecutionsCard
           sx={{ gridArea: 'recent' }}
-          executions={MOCK_RECENT_EXECUTIONS}
-          maxItems={3}
+          executions={recent.executions}
+          maxItems={RECENT_EXECUTIONS_LIMIT}
+          isLoading={recent.isLoading}
+          errorMessage={recent.error}
+          onRetry={recent.reload}
           onViewDetails={handleViewDetails}
         />
       </Box>

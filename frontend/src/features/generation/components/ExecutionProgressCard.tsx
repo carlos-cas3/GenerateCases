@@ -9,10 +9,11 @@ import Typography from '@mui/material/Typography';
 import type { SxProps, Theme } from '@mui/material/styles';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
-import { BaseCard } from '../../../components/cards';
+import { BaseCard } from '@/shared/components/BaseCard';
 import type { ExecutionStage, ExecutionStatus } from '../types';
-import { StatusChip } from '../../../shared/execution/StatusChip';
-import { StatusIcon, toneColor, STATUS_CONFIG } from '../../../shared/execution/statusConfig';
+import { StatusChip } from '@/shared/components/StatusChip';
+import { StatusIcon } from '@/shared/components/StatusIcon';
+import { STATUS_CONFIG, toneColor } from '@/shared/components/statusConfig';
 
 export interface ExecutionProgressCardProps {
   /** Estado general. Si se omite, se deriva de las etapas. */

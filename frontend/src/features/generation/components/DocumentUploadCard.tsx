@@ -13,7 +13,7 @@ import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded';
-import { BaseCard } from '../../../components/cards';
+import { BaseCard } from '@/shared/components/BaseCard';
 
 const ACCEPTED_EXTENSIONS = ['pdf', 'docx', 'txt'] as const;
 const DEFAULT_MAX_SIZE_MB = 20;

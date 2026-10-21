@@ -8,8 +8,8 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import { DifferenceValue } from '../../../shared/components/DifferenceValue';
-import { formatValue } from '../../../shared/utils/metricFormat';
+import { DifferenceValue } from '@/shared/components/DifferenceValue';
+import { formatValue } from '@/shared/utils/metricFormat';
 import type { ComparisonRow } from '../types';
 
 export interface ComparisonTableProps {
