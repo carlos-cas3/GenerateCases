@@ -2,7 +2,7 @@
  * Datos ficticios SOLO para la demostración visual.
  * Se reemplazan por datos reales cuando exista el backend.
  */
-import { getStageDefinitions } from '../stageDefinitions';
+import { getStageDefinitions } from '../utils/stageDefinitions';
 import type { ExecutionStage, ExecutionStatus, RecentExecution } from '../types';
 
 /** Construye etapas de ejemplo: las primeras completadas, una en proceso y el resto pendientes. */
