@@ -1,5 +1,5 @@
 
-name: Frontend CI
+name: Frontend CI/CD
 
 on:
   push:
@@ -53,3 +53,17 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_FRONTEND }}
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.sources=src
+  deploy:
+    name: Deploy frontend to Vercel
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Vercel Deploy Hook
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          curl --fail --silent --show-error \
+            --request POST \
+            "$VERCEL_DEPLOY_HOOK"
