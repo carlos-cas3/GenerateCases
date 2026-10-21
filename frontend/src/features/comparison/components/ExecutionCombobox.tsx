@@ -16,6 +16,7 @@ export interface ExecutionComboboxProps {
   badge: string;
   badgeColor: 'primary' | 'default';
   options: ExecutionRecord[];
+  loading?: boolean;
   value: ExecutionRecord | null;
   onChange: (value: ExecutionRecord | null) => void;
   noOptionsText: string;
@@ -28,6 +29,7 @@ export function ExecutionCombobox({
   badge,
   badgeColor,
   options,
+  loading = false,
   value,
   onChange,
   noOptionsText,
@@ -44,6 +46,7 @@ export function ExecutionCombobox({
       <Autocomplete
         id={id}
         options={options}
+        loading={loading}
         value={value}
         onChange={(_, next) => onChange(next)}
         getOptionLabel={(option) => option.documentName}
