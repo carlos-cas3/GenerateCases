@@ -33,6 +33,8 @@ export const generationService = {
         _input: StartGenerationInput,
     ): Promise<{ executionId: string }> {
         await delay(800);
+        // El servicio todavía utiliza una respuesta simulada.
+        void _input;
         return { executionId: `exec-${Date.now()}` };
     },
 };
