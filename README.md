@@ -1,1 +1,1 @@
-Backend pipeline
+front, back monorepo
