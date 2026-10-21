@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { ExecutionStatus } from '../../shared/execution/types';
+import type { ExecutionStatus } from '@/shared/types';
 
 export type { ExecutionStatus };
 
