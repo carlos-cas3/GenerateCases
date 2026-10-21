@@ -8,7 +8,7 @@ import type { SxProps, Theme } from '@mui/material/styles';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import FilterAltOffOutlinedIcon from '@mui/icons-material/FilterAltOffOutlined';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
-import { BaseCard } from '../../../components/cards';
+import { BaseCard } from '@/shared/components/BaseCard';
 import { HISTORY_STATUS_LABEL, STATUS_FILTER_ORDER } from '../constants';
 import type { ClusteringFilter, HistoryFilters, StatusFilter } from '../types';
 

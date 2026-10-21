@@ -3,11 +3,11 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import type { SxProps, Theme } from '@mui/material/styles';
 import ClearAllRoundedIcon from '@mui/icons-material/ClearAllRounded';
-import { BaseCard } from '../../../components/cards';
-import type { ExecutionRecord } from '../../history/types';
-import { getDocumentBaseName } from '../../history/utils/comparison';
-import type { CompareStatus } from '../../history/utils/comparison';
-import { splitFileName } from '../../history/utils/fileName';
+import { BaseCard } from '@/shared/components/BaseCard';
+import type { ExecutionRecord } from '@/features/history';
+import { getDocumentBaseName } from '@/features/history';
+import type { CompareStatus } from '@/features/history';
+import { splitFileName } from '@/features/history';
 import { ExecutionCombobox } from './ExecutionCombobox';
 
 export interface ExecutionSelectorCardProps {

@@ -1,4 +1,4 @@
-import type { ExecutionStatus } from '../../shared/execution/types';
+import type { ExecutionStatus } from '@/shared/types';
 import type { HistoryFilters, SortDirection, SortKey, SortState } from './types';
 
 /** Etiquetas del historial (el estado «pending» representa la cola). */

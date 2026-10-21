@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
-import { formatValue } from '../../../shared/utils/metricFormat';
+import { formatValue } from '@/shared/utils/metricFormat';
 import { MetricBar } from './MetricBar';
 
 export interface MetricSeriesRowProps {

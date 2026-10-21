@@ -1,5 +1,5 @@
 import type { SxProps, Theme } from '@mui/material/styles';
-import { BaseCard } from '../../../components/cards';
+import { BaseCard } from '@/shared/components/BaseCard';
 import type { ComparisonRow } from '../types';
 import { ComparisonTable } from './ComparisonTable';
 

@@ -1,8 +1,10 @@
+import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
+import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
-import { BaseCard } from '../../../components/cards';
-import { MetricComparisonCard } from '../../metrics/components/MetricComparisonCard';
-import type { MetricComparison } from '../../metrics/types';
+import { BaseCard } from '@/shared/components/BaseCard';
+import { MetricComparisonCard } from '@/features/metrics';
+import type { MetricComparison } from '@/features/metrics';
 
 export interface QualityMetricsSectionProps {
   /** Las métricas llegan por props: aún no están definidas, así que la lista es configurable. */

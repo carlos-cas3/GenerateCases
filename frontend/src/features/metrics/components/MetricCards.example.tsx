@@ -1,7 +1,7 @@
-import Box from "@mui/material/Box";
-import { MetricCard } from "./MetricCard";
-import { MetricComparisonCard } from "./MetricComparisonCard";
-import type { MetricComparison } from "../types";
+import Box from '@mui/material/Box';
+import { MetricCard } from './MetricCard';
+import { MetricComparisonCard } from './MetricComparisonCard';
+import type { MetricComparison } from '../types';
 
 const SAMPLE: MetricComparison = {
     id: "coverage",

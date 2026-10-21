@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import LinearProgress from '@mui/material/LinearProgress';
 import Typography from '@mui/material/Typography';
-import { formatValue } from '../../../shared/utils/metricFormat';
+import { formatValue } from '@/shared/utils/metricFormat';
 
 export interface MetricBarProps {
   /** Valor en % (0–100). `null` = sin dato: se dibuja la barra vacía. */
