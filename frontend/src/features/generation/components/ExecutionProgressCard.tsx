@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import ButtonBase from "@mui/material/ButtonBase";
 import Collapse from "@mui/material/Collapse";
 import LinearProgress from "@mui/material/LinearProgress";
@@ -21,6 +22,7 @@ export interface ExecutionProgressCardProps {
     stages: ExecutionStage[];
     isLoading?: boolean;
     errorMessage?: string;
+    onRetry?: () => void;
     /** Ids de etapas expandidas al inicio. */
     defaultExpandedIds?: string[];
     emptyMessage?: string;
@@ -190,6 +192,7 @@ export function ExecutionProgressCard({
     stages,
     isLoading = false,
     errorMessage,
+    onRetry,
     defaultExpandedIds = [],
     emptyMessage = "Aún no hay una ejecución en curso. Sube un documento para comenzar.",
     sx,
@@ -249,7 +252,21 @@ export function ExecutionProgressCard({
                     ))}
                 </Box>
             ) : errorMessage ? (
-                <Alert severity="error" variant="outlined">
+                <Alert
+                    severity="error"
+                    variant="outlined"
+                    action={
+                        onRetry && (
+                            <Button
+                                color="inherit"
+                                size="small"
+                                onClick={onRetry}
+                            >
+                                Reintentar
+                            </Button>
+                        )
+                    }
+                >
                     {errorMessage}
                 </Alert>
             ) : !hasStages ? (

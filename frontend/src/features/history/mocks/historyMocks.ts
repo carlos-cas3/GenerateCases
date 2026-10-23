@@ -2,7 +2,7 @@
  * Datos ficticios SOLO para la demostración visual.
  * Incluye pares del mismo documento con y sin clustering para probar la comparación.
  */
-import type { ExecutionRecord } from "../types";
+import type { ExecutionFailure, ExecutionRecord } from "../types";
 
 export const MOCK_HISTORY: ExecutionRecord[] = [
     {
@@ -156,4 +156,64 @@ export const MOCK_HISTORY: ExecutionRecord[] = [
         cpCount: 105,
         clustering: true,
     },
+    {
+        id: "e-116",
+        documentName: "report_final.docx",
+        uploadedAt: "2026-09-22T10:10:00",
+        status: "completed",
+        huCount: 10,
+        rfCount: 36,
+        cpCount: 105,
+        clustering: true,
+    },
+    {
+        id: "e-117",
+        documentName: "annual_report.pdf",
+        uploadedAt: "2026-09-22T10:10:00",
+        status: "completed",
+        huCount: 15,
+        rfCount: 28,
+        cpCount: 105,
+        clustering: true,
+    },
+    {
+        id: "e-118",
+        documentName: "REPORT_2026.pdf",
+        uploadedAt: "2026-09-22T10:10:00",
+        status: "completed",
+        huCount: 20,
+        rfCount: 10,
+        cpCount: 30,
+        clustering: true,
+    },
+    {
+        id: "e-119",
+        documentName: "report.pdf",
+        uploadedAt: "2026-09-22T10:10:00",
+        status: "completed",
+        huCount: 10,
+        rfCount: 50,
+        cpCount: 60,
+        clustering: true,
+    },
 ];
+
+/** Problemas simulados de las ejecuciones fallidas (por id). */
+export const MOCK_FAILURES: Record<string, ExecutionFailure> = {
+    "e-120": {
+        stage: "Extracción de requisitos funcionales",
+        message:
+            "El documento no contiene historias de usuario reconocibles. Verifica que siga el formato «Como… quiero… para…».",
+    },
+    "e-121": {
+        stage: "Procesamiento y validación del documento",
+        message:
+            "No se pudo leer el contenido del archivo: el texto está vacío o dañado.",
+    },
+};
+
+export const DEFAULT_FAILURE: ExecutionFailure = {
+    stage: "Desconocida",
+    message:
+        "La ejecución terminó con un error y no se registró el detalle del problema.",
+};
