@@ -1,11 +1,15 @@
 import { useMemo, useState } from "react";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
+import Snackbar from "@mui/material/Snackbar";
 import Typography from "@mui/material/Typography";
 import { CompareButton } from "../components/CompareButton";
 import { ConfirmDeleteDialog } from "../components/ConfirmDeleteDialog";
+import { ConfirmDownloadDialog } from "../components/ConfirmDownloadDialog";
 import { ExecutionFiltersCard } from "../components/ExecutionFiltersCard";
 import { ExecutionHistoryTableCard } from "../components/ExecutionHistoryTableCard";
+import { useDownloadExecutions } from "../hooks/useDownloadExecutions";
 import { useExecutions } from "../hooks/useExecutions";
 import { useHistoryQuery } from "../hooks/useHistoryQuery";
 import type { ExecutionRecord } from "../types";
@@ -40,6 +44,47 @@ export function HistoryPage({ onCompare, onView, onEdit }: HistoryPageProps) {
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState<string>();
+
+    // ---- Descarga (reutiliza la misma selección múltiple que eliminar) ----
+    const downloads = useDownloadExecutions();
+    const [downloadTargets, setDownloadTargets] = useState<ExecutionRecord[]>(
+        [],
+    );
+    const [downloadOpen, setDownloadOpen] = useState(false);
+    const [notice, setNotice] = useState<{
+        severity: "success" | "error";
+        message: string;
+    } | null>(null);
+
+    const runDownload = async (targets: ExecutionRecord[]) => {
+        const result = await downloads.download(targets);
+        if (result.ok)
+            setNotice({
+                severity: "success",
+                message: `Descarga iniciada: ${result.fileName}`,
+            });
+        else if (result.reason === "error") {
+            setNotice({
+                severity: "error",
+                message:
+                    "No se pudo completar la descarga. Inténtalo nuevamente.",
+            });
+        }
+    };
+
+    const requestDownload = (targets: ExecutionRecord[]) => {
+        if (targets.length === 1) {
+            void runDownload(targets); // un solo documento: descarga automática
+            return;
+        }
+        setDownloadTargets(targets); // 2 o más: primero se confirma en un modal
+        setDownloadOpen(true);
+    };
+
+    const confirmDownload = async () => {
+        await runDownload(downloadTargets);
+        setDownloadOpen(false);
+    };
 
     const requestDelete = (targets: ExecutionRecord[]) => {
         setDeleteTargets(targets);
@@ -130,10 +175,12 @@ export function HistoryPage({ onCompare, onView, onEdit }: HistoryPageProps) {
                     }
                     onClearSelection={() => setSelectedIds([])}
                     compareStatus={compareStatus}
-                    // TODO: abrir el detalle / la edición de la ejecución.
+                    // «Ver detalles» y «Editar» los conecta quien compone la página (ver app/HistoryRoute.tsx).
                     onView={(record) => onView?.(record)}
                     onEdit={(record) => onEdit?.(record)}
                     onDeleteRequest={requestDelete}
+                    onDownloadRequest={requestDownload}
+                    isDownloadBusy={downloads.isBusy}
                     isLoading={isLoading}
                     errorMessage={error}
                     onRetry={reload}
@@ -148,6 +195,33 @@ export function HistoryPage({ onCompare, onView, onEdit }: HistoryPageProps) {
                 onCancel={() => setDeleteOpen(false)}
                 onConfirm={confirmDelete}
             />
+
+            <ConfirmDownloadDialog
+                open={downloadOpen}
+                items={downloadTargets}
+                isDownloading={downloads.isDownloading}
+                onCancel={() => setDownloadOpen(false)}
+                onConfirm={confirmDownload}
+            />
+
+            {notice && (
+                <Snackbar
+                    open
+                    autoHideDuration={4000}
+                    onClose={(_, reason) =>
+                        reason !== "clickaway" && setNotice(null)
+                    }
+                    anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+                >
+                    <Alert
+                        severity={notice.severity}
+                        variant="filled"
+                        onClose={() => setNotice(null)}
+                    >
+                        {notice.message}
+                    </Alert>
+                </Snackbar>
+            )}
         </Container>
     );
 }

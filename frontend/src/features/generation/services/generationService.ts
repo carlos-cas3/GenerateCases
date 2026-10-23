@@ -37,4 +37,13 @@ export const generationService = {
         void _input;
         return { executionId: `exec-${Date.now()}` };
     },
+
+    /** Pipeline de UNA ejecución concreta. (Backend: GET /executions/:id/pipeline) */
+    async getExecutionPipeline(
+        _executionId: string,
+        semanticGrouping: boolean,
+    ): Promise<ExecutionStage[]> {
+        await delay(300);
+        return buildMockStages(semanticGrouping, "running");
+    },
 };

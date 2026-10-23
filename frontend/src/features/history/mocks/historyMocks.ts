@@ -2,7 +2,7 @@
  * Datos ficticios SOLO para la demostración visual.
  * Incluye pares del mismo documento con y sin clustering para probar la comparación.
  */
-import type { ExecutionRecord } from "../types";
+import type { ExecutionFailure, ExecutionRecord } from "../types";
 
 export const MOCK_HISTORY: ExecutionRecord[] = [
     {
@@ -197,3 +197,23 @@ export const MOCK_HISTORY: ExecutionRecord[] = [
         clustering: true,
     },
 ];
+
+/** Problemas simulados de las ejecuciones fallidas (por id). */
+export const MOCK_FAILURES: Record<string, ExecutionFailure> = {
+    "e-120": {
+        stage: "Extracción de requisitos funcionales",
+        message:
+            "El documento no contiene historias de usuario reconocibles. Verifica que siga el formato «Como… quiero… para…».",
+    },
+    "e-121": {
+        stage: "Procesamiento y validación del documento",
+        message:
+            "No se pudo leer el contenido del archivo: el texto está vacío o dañado.",
+    },
+};
+
+export const DEFAULT_FAILURE: ExecutionFailure = {
+    stage: "Desconocida",
+    message:
+        "La ejecución terminó con un error y no se registró el detalle del problema.",
+};

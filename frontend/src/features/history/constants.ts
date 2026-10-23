@@ -28,3 +28,6 @@ export const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
   rfCount: 'desc',
   cpCount: 'desc',
 };
+
+/** Espera tras una descarga antes de permitir otra (evita solicitudes repetidas por clics seguidos). */
+export const DOWNLOAD_COOLDOWN_MS = 3000;
