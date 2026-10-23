@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useComparisonSelection } from "@/features/comparison";
 import { HistoryPage } from "@/features/history";
-import { ROUTES } from "./paths";
+import { historyDetailPath, ROUTES } from "./paths";
 
 /**
  * Aquí se conectan dos features entre sí.
@@ -18,6 +18,7 @@ export function HistoryRoute() {
                 selectPair(pair);
                 navigate(ROUTES.comparison);
             }}
+            onView={(record) => navigate(historyDetailPath(record.id))}
         />
     );
 }
