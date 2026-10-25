@@ -15,18 +15,30 @@ function byDocumentThenDate(a: ExecutionRecord, b: ExecutionRecord) {
 
 /**
  * Opciones de cada combobox. Cada lista se restringe al documento que ya eligió el otro,
- * así es imposible armar un par inválido:
+ * así es imposible armar un par inválido, y solo se ofrecen ejecuciones ya completadas
+ * (de lo contrario no hay resultados que comparar):
  * - A: ejecuciones CON clustering
  * - B: ejecuciones SIN clustering
  */
-export function getOptionsA(records: ExecutionRecord[], selectedB: ExecutionRecord | null) {
+function getOptions(
+  records: ExecutionRecord[],
+  clustering: boolean,
+  selectedOther: ExecutionRecord | null,
+) {
   return records
-    .filter((r) => r.clustering && (!selectedB || isSameDocument(r, selectedB)))
+    .filter(
+      (r) =>
+        r.status === 'completed' &&
+        r.clustering === clustering &&
+        (!selectedOther || isSameDocument(r, selectedOther)),
+    )
     .sort(byDocumentThenDate);
 }
 
+export function getOptionsA(records: ExecutionRecord[], selectedB: ExecutionRecord | null) {
+  return getOptions(records, true, selectedB);
+}
+
 export function getOptionsB(records: ExecutionRecord[], selectedA: ExecutionRecord | null) {
-  return records
-    .filter((r) => !r.clustering && (!selectedA || isSameDocument(r, selectedA)))
-    .sort(byDocumentThenDate);
+  return getOptions(records, false, selectedA);
 }

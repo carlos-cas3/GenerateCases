@@ -1,3 +1,5 @@
+//CURRENTLY NOT USED, BUT IT'S A GOOD COMPONENT TO HAVE FOR FUTURE COMPARISON TABLES
+
 import Box from '@mui/material/Box';
 import Skeleton from '@mui/material/Skeleton';
 import Table from '@mui/material/Table';

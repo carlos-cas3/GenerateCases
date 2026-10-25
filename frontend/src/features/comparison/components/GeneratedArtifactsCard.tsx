@@ -1,7 +1,7 @@
 import type { SxProps, Theme } from '@mui/material/styles';
 import { BaseCard } from '@/shared/components/BaseCard';
 import type { ComparisonRow } from '../types';
-import { ComparisonTable } from './ComparisonTable';
+import { ArtifactsBarChart } from './ArtifactsBarChart';
 
 export interface GeneratedArtifactsCardProps {
   rows: ComparisonRow[];
@@ -16,9 +16,8 @@ export function GeneratedArtifactsCard({ rows, isLoading, sx }: GeneratedArtifac
       description="Cantidad de historias de usuario, requisitos funcionales y casos de prueba que produjo cada ejecución."
       sx={sx}
     >
-      <ComparisonTable
+      <ArtifactsBarChart
         ariaLabel="Comparación de artefactos generados"
-        firstColumnLabel="Artefacto"
         rows={rows}
         isLoading={isLoading}
         emptyMessage="Esta comparación no tiene artefactos."
