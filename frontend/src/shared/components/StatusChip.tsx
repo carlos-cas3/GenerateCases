@@ -1,19 +1,20 @@
 import Chip from "@mui/material/Chip";
 import { alpha } from "@mui/material/styles";
 import type { SxProps, Theme } from "@mui/material/styles";
-import type { ExecutionStatus } from "../types";
+import type { StageStatus } from "../types";
 import { StatusIcon } from "./StatusIcon";
-import { STATUS_CONFIG } from "./statusConfig";
+import { STAGE_STATUS_CONFIG } from "./statusConfig";
 
 interface StatusChipProps {
-    status: ExecutionStatus;
+    /** Acepta estados de ejecución y de etapa (`skipped`). */
+    status: StageStatus;
     /** Sobrescribe el texto por defecto (p. ej. "Ejecución en curso"). */
     label?: string;
     sx?: SxProps<Theme>;
 }
 
 export function StatusChip({ status, label, sx }: StatusChipProps) {
-    const { tone, label: defaultLabel } = STATUS_CONFIG[status];
+    const { tone, label: defaultLabel } = STAGE_STATUS_CONFIG[status];
 
     return (
         <Chip

@@ -1,0 +1,80 @@
+{
+  "id": "2df2e2f2-0f98-49ac-ad71-f76d77423159",
+  "document_id": "6f9d1c2e-0a4b-4c8d-9e1f-2b3c4d5e6f70",
+  "document_name": "historias-release-1.txt",
+  "status": "completed",
+  "configuration": {
+    "semantic_clustering_enabled": false,
+    "method_type": "llm_pipeline"
+  },
+  "stages": [
+    {
+      "key": "p1",
+      "name": "Normalización de historias de usuario",
+      "status": "completed",
+      "error_message": null,
+      "started_at": "2026-10-26T23:25:22.705035Z",
+      "completed_at": "2026-10-26T23:25:23.320439Z",
+      "order": 1
+    },
+    {
+      "key": "p2",
+      "name": "Extracción de requisitos funcionales",
+      "status": "completed",
+      "error_message": null,
+      "started_at": "2026-10-26T23:25:23.320439Z",
+      "completed_at": "2026-10-26T23:25:23.912444Z",
+      "order": 2
+    },
+    {
+      "key": "p3",
+      "name": "Generación de embeddings",
+      "status": "skipped",
+      "error_message": null,
+      "started_at": null,
+      "completed_at": "2026-10-26T23:25:23.912444Z",
+      "order": 3
+    },
+    {
+      "key": "p4",
+      "name": "Clustering semántico",
+      "status": "skipped",
+      "error_message": null,
+      "started_at": null,
+      "completed_at": "2026-10-26T23:25:23.912444Z",
+      "order": 4
+    },
+    {
+      "key": "p5",
+      "name": "Construcción de contexto estructurado",
+      "status": "completed",
+      "error_message": null,
+      "started_at": "2026-10-26T23:25:23.912444Z",
+      "completed_at": "2026-10-26T23:25:24.519411Z",
+      "order": 5
+    },
+    {
+      "key": "p6",
+      "name": "Generación de casos de prueba funcionales",
+      "status": "completed",
+      "error_message": null,
+      "started_at": "2026-10-26T23:25:24.519411Z",
+      "completed_at": "2026-10-26T23:25:25.119749Z",
+      "order": 6
+    },
+    {
+      "key": "p7",
+      "name": "Evaluación de resultados",
+      "status": "skipped",
+      "error_message": null,
+      "started_at": null,
+      "completed_at": "2026-10-26T23:25:25.119749Z",
+      "order": 7
+    }
+  ],
+  "summary": null,
+  "error_message": null,
+  "created_at": "2026-10-26T23:25:22.702759Z",
+  "started_at": "2026-10-26T23:25:22.705035Z",
+  "completed_at": "2026-10-26T23:25:25.119749Z"
+}

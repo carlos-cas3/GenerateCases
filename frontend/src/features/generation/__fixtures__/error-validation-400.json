@@ -1,0 +1,12 @@
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "La solicitud contiene datos inválidos.",
+    "details": [
+      {
+        "path": "limit",
+        "message": "Input should be greater than or equal to 1"
+      }
+    ]
+  }
+}

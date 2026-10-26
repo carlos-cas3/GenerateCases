@@ -1,0 +1,77 @@
+Actúa como desarrollador Backend Senior experto en Python 3.12, FastAPI, Pydantic v2 y Supabase (PostgreSQL).
+
+FUENTE DE VERDAD
+Adjunto README.md, database.md, pipeline-orchestration.md y docs/openapi.yaml. Son el contrato: no inventes endpoints, campos, tablas ni códigos de error que no estén ahí. Si detectas una contradicción o un hueco, no lo resuelvas en silencio: aplica la opción más conservadora y lístalo en una sección "Supuestos y discrepancias" al inicio de tu respuesta.
+
+OBJETIVO DE LA FASE 1
+Flujo vertical completo para crear, seguir y eliminar generaciones (`generations` y `generation_stages`). Las etapas P1–P7 se ejecutan en segundo plano con lógica SIMULADA (sleeps) para validar transiciones de estado, persistencia en Supabase y polling. Sin LLM, sin embeddings, sin extracción de requisitos ni generación de casos reales.
+
+ENTREGABLES
+
+A. Base de datos (`supabase/schema.sql` y `supabase/seed.sql`)
+- Las 13 tablas de database.md (incluida `generation_stages`) con PK, FK (compuestas donde se indica), CHECK de estados, UNIQUE (generation_id, stage_key) y (generation_id, stage_order), e índices de la sección 6.
+- Borrado en cascada desde `generations` hacia sus tablas dependientes. `documents` sin cascada.
+- Función SQL `create_generation(p_document_id, p_clustering_enabled, p_method_type, p_config_snapshot)` que inserta la generación (`queued`) y sus 7 etapas (`p1`–`p7`, `pending`, `stage_order` 1–7) en UNA transacción y devuelve el id.
+- Función SQL `delete_generation_if_final(p_id)` atómica, que devuelva `deleted`, `not_found` o `in_progress` (si está `queued` o `running`).
+- `seed.sql` con un documento de prueba.
+
+B. Base de la aplicación
+- `pyproject.toml` o `requirements.txt` (fastapi, uvicorn, pydantic>=2, pydantic-settings, supabase, pytest, pytest-asyncio, httpx) y `.env.example`.
+- `ai_service/config.py` (pydantic-settings): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, PIPELINE_STUB_DELAY_SECONDS (def. 2), PIPELINE_STUB_FAIL_AT_STAGE (opcional, p. ej. "p4"), DEFAULT_METHOD_TYPE (def. "llm_pipeline"). Marca en "Supuestos" las variables nuevas. La clave de servicio nunca sale del backend.
+- `ai_service/clients/supabase.py`, `ai_service/main.py` (create_app con lifespan), `ai_service/api/dependencies.py`.
+- Errores: excepciones de dominio (`DocumentNotFound`, `GenerationNotFound`, `GenerationInProgress`) y manejadores globales que devuelvan SIEMPRE `{"error": {"code","message","details"}}`:
+  RequestValidationError → 400 VALIDATION_ERROR (details: lista {path, message}); UUID mal formado → 400 VALIDATION_ERROR; DOCUMENT_NOT_FOUND 404; GENERATION_NOT_FOUND 404; GENERATION_IN_PROGRESS 409; NOT_IMPLEMENTED 501; cualquier otra excepción → 500 INTERNAL_ERROR sin trazas (el detalle va al log).
+- `GET /api/v1/health`.
+
+C. Esquemas Pydantic (`ai_service/schemas/generations.py`), alineados con openapi.yaml
+GenerationStatus y StageStatus como enums; CreateGenerationRequest (extra="forbid"), GenerationConfiguration (semantic_clustering_enabled=true por defecto, method_type opcional), GenerationStage (key, name, status, error_message, started_at, completed_at, order), MetricSummary, GenerationSummary, Generation, GenerationList + Pagination {limit, offset, total}. Los campos nullable deben serializarse como `null`, no omitirse.
+
+D. Repositorio (`ai_service/repositories/generations.py`)
+- Define un Protocol/ABC y una implementación Supabase. El código bloqueante del cliente se ejecuta con `asyncio.to_thread` (o cliente async) para no bloquear el bucle de eventos.
+- Operaciones: crear (vía RPC), obtener por id (generación + `documents.filename` como document_name + 7 etapas ordenadas por stage_order), listar (filtros document_id y status, orden created_at desc, limit/offset, total exacto), actualizar estado de generación, actualizar etapa (estado, started_at, completed_at, error_message), eliminar (vía RPC; traduce `in_progress` y `not_found` a excepciones de dominio), y `mark_interrupted()` para la recuperación de arranque.
+- Las actualizaciones de estado llevan guarda (UPDATE ... WHERE status = <esperado>): si no afectan filas, lanza `InvalidStateTransition` y regístralo en el log.
+- Incluye también `ai_service/repositories/documents.py` con solo `get_by_id`.
+- Incluye un repositorio FAKE en memoria (para tests) que cumpla el mismo Protocol.
+
+E. Servicios y pipeline
+- `ai_service/services/generations.py` (GenerationsService): valida que el documento exista (404 DOCUMENT_NOT_FOUND), arma configuration y config_snapshot (con los valores por defecto ya aplicados), crea la generación con el repositorio y programa la ejecución con BackgroundTasks. Expone get, list y delete.
+- `ai_service/pipeline/catalog.py`: catálogo con key, name y order de p1–p7 (nombres exactamente como en openapi.yaml y pipeline-orchestration.md). El `name` de la API sale de aquí.
+- `ai_service/pipeline/events.py`: eventos Pydantic (stage_started, stage_completed, stage_skipped, stage_failed, pipeline_completed, pipeline_failed) y un Protocol `ProgressReporter`.
+- `ai_service/pipeline/stages/base.py` (StageBase con `implemented: bool` y `async run(context)`) y siete stubs p1..p7 que solo hacen `await asyncio.sleep(PIPELINE_STUB_DELAY_SECONDS)`. P7 tiene `implemented = False`. Si PIPELINE_STUB_FAIL_AT_STAGE coincide con la etapa, el stub lanza una excepción simulada.
+- `ai_service/pipeline/context.py`: PipelineContext tipado (generation_id, configuración).
+- `ai_service/pipeline/orchestrator.py`: NO conoce Supabase ni FastAPI. Para cada etapa en orden: si debe omitirse (P3 y P4 con clustering deshabilitado; cualquier etapa con implemented=False) emite stage_skipped (pending → skipped, sin started_at, con completed_at) y continúa; si no, emite stage_started, ejecuta, emite stage_completed. Si una etapa falla: stage_failed con mensaje SEGURO, las siguientes quedan en `pending`, emite pipeline_failed y termina. Al final emite pipeline_completed.
+- `ai_service/services/pipeline_runs.py`: implementa ProgressReporter; traduce cada evento en escrituras a través del repositorio según la tabla de transiciones de pipeline-orchestration.md §5 (queued→running con started_at al iniciar; en pipeline_failed la generación guarda error_message y completed_at; completed solo si las 7 etapas están completed o skipped). Envuelve la tarea completa en try/except: cualquier excepción no prevista marca la generación `failed`. Si falla una escritura de estado, trátalo como error explícito (no asumas que quedó registrado). Si usas asyncio.create_task, conserva una referencia fuerte a la tarea.
+- Recuperación al arrancar (lifespan): las generaciones en `queued` o `running` pasan a `failed` con error_message "Ejecución interrumpida por reinicio del servicio.", su etapa `running` pasa a `failed` y las `pending` se quedan igual. Documenta que asume un único proceso.
+
+F. Rutas (`ai_service/api/routes/generations.py`), sin lógica de negocio ni acceso a Supabase
+- POST /api/v1/generations → 202 con Generation (7 etapas pending, summary null).
+- GET /api/v1/generations (limit 1–100 def. 20, offset ≥ 0, document_id, status).
+- GET /api/v1/generations/{generation_id} (summary = null en esta fase; no devuelvas conteos inventados).
+- DELETE /api/v1/generations/{generation_id} → 204 sin cuerpo, 404 o 409 GENERATION_IN_PROGRESS.
+- GET /api/v1/generations/{generation_id}/events → 501 NOT_IMPLEMENTED.
+- No implementes 503 AI_SERVICE_UNAVAILABLE ni límite de concurrencia (decisiones pendientes).
+
+G. Tests (pytest, repositorio fake, delay = 0, sin Supabase)
+1. POST → 202, 7 etapas pending, document_name y configuration correctos.
+2. Camino feliz: p1–p6 completed, p7 skipped, generación completed con started_at y completed_at.
+3. Clustering deshabilitado: p3 y p4 skipped, sin started_at, con completed_at.
+4. Fallo inyectado en p4: p4 failed con error_message, p5–p7 pending, generación failed con error_message y completed_at.
+5. DELETE: 409 si queued o running, 204 si completed o failed, 404 si no existe.
+6. Listado: filtros, orden, limit/offset y total.
+7. Errores: 400 VALIDATION_ERROR (cuerpo inválido, limit=0, UUID mal formado), 404 DOCUMENT_NOT_FOUND, formato estándar en todos.
+8. /events → 501.
+9. Recuperación de ejecuciones interrumpidas.
+10. Contrato: valida las respuestas contra los esquemas de openapi.yaml (jsonschema/openapi-core).
+
+REGLAS
+- Controller → Service → Repository estrictos. Solo repositories/ y clients/ tocan Supabase.
+- Sin print: usa logging con generation_id y stage_key. Nada de secretos ni trazas en respuestas.
+- Fechas en UTC (ISO 8601). Tipado completo y docstrings breves.
+
+DOCUMENTACION
+Crea en la carpeta backend un archivo describiendo:
+1) "Supuestos y discrepancias". 
+2) Árbol de archivos. 
+3) Código completo, cada archivo con su ruta como encabezado. 
+4) Comandos para instalar, aplicar schema.sql/seed.sql, ejecutar uvicorn y correr pytest, más 5 curl de prueba (crear, consultar con polling, listar, borrar, events). 
+5) Criterios de aceptación cumplidos, marcando cuáles verificaste con los tests y cuáles requieren Supabase real.
