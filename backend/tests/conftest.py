@@ -16,6 +16,7 @@ from ai_service.repositories.in_memory import (
     InMemoryStore,
 )
 from ai_service.schemas.records import DocumentRecord
+from tests.factories import FakeDocumentStorage
 
 DOCUMENT_ID = UUID("6f9d1c2e-0a4b-4c8d-9e1f-2b3c4d5e6f70")
 DOCUMENT_NAME = "historias-release-1.txt"
@@ -29,6 +30,7 @@ def store() -> InMemoryStore:
         filename=DOCUMENT_NAME,
         file_type="txt",
         size_bytes=4821,
+        storage_path=f"{DOCUMENT_ID}/{DOCUMENT_NAME}",
         checksum="9b74c9897bac770ffc029102a200c5de",
         uploaded_at=datetime(2026, 10, 25, 12, 0, tzinfo=UTC),
     )
@@ -44,7 +46,12 @@ ClientFactory = Callable[..., TestClient]
 
 
 @pytest.fixture
-def client_factory(store: InMemoryStore) -> Iterator[ClientFactory]:
+def storage() -> FakeDocumentStorage:
+    return FakeDocumentStorage()
+
+
+@pytest.fixture
+def client_factory(store: InMemoryStore, storage: FakeDocumentStorage) -> Iterator[ClientFactory]:
     """Crea clientes con ajustes opcionales; se cierran al terminar el test."""
     opened: list[TestClient] = []
 
@@ -53,6 +60,7 @@ def client_factory(store: InMemoryStore) -> Iterator[ClientFactory]:
             make_settings(**overrides),
             generations_repository=generations_repository or InMemoryGenerationsRepository(store),
             documents_repository=InMemoryDocumentsRepository(store),
+            documents_storage=storage,
         )
         client = TestClient(app, raise_server_exceptions=raise_server_exceptions)
         client.__enter__()

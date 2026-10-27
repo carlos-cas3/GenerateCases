@@ -1,8 +1,10 @@
-"""Constructores de generaciones en estados concretos para preparar escenarios."""
+"""Constructores de escenarios: generaciones en estados concretos y Storage falso."""
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from ai_service.clients.storage import build_storage_path
 from ai_service.repositories.in_memory import InMemoryStore
 from ai_service.schemas.generations import GenerationStatus, StageKey, StageStatus
 from ai_service.schemas.records import GenerationRecord, StageRecord
@@ -37,3 +39,22 @@ def add_generation(
     )
     store.add_generation(record)
     return record.id
+
+
+@dataclass
+class FakeDocumentStorage:
+    """Fake de `DocumentStorage`: objetos en memoria y registro de llamadas para asertar."""
+
+    objects: dict[str, bytes] = field(default_factory=dict)
+    uploads: list[str] = field(default_factory=list)
+    removes: list[str] = field(default_factory=list)
+
+    async def upload(self, *, document_id: UUID, filename: str, content_type: str, data: bytes) -> str:
+        storage_path = build_storage_path(document_id, filename)
+        self.objects[storage_path] = data
+        self.uploads.append(storage_path)
+        return storage_path
+
+    async def remove(self, storage_path: str) -> None:
+        self.removes.append(storage_path)
+        self.objects.pop(storage_path, None)

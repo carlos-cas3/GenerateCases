@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     pipeline_stub_fail_at_stage: StageKeyLiteral | None = None
     default_method_type: str = Field(default="llm_pipeline", min_length=1)
 
+    # Subida de documentos: límite por archivo (20 MiB) y bucket privado de Supabase Storage.
+    max_upload_size_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
+    documents_bucket: str = Field(default="docs_testgen", min_length=1)
+
     # Orígenes del frontend autorizados por CORS. En `.env`: lista separada por comas.
     # El valor por defecto solo cubre desarrollo local; producción debe definir los suyos.
     frontend_origins: Annotated[list[str], NoDecode] = Field(

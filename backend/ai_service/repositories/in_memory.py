@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from ai_service.core.errors import DocumentNotFound, GenerationInProgress, GenerationNotFound, InvalidStateTransition
+from ai_service.core.errors import DocumentInUse, DocumentNotFound, GenerationInProgress, GenerationNotFound, InvalidStateTransition
 from ai_service.core.time import utc_now
 from ai_service.schemas.generations import (
     ACTIVE_GENERATION_STATUSES,
@@ -28,6 +28,7 @@ class InMemoryStore:
     documents: dict[UUID, DocumentRecord] = field(default_factory=dict)
     generations: dict[UUID, GenerationRecord] = field(default_factory=dict)
     insertion_order: dict[UUID, int] = field(default_factory=dict)
+    document_order: dict[UUID, int] = field(default_factory=dict)
     _sequence: itertools.count = field(default_factory=itertools.count)
 
     def add_generation(self, record: GenerationRecord) -> None:
@@ -45,6 +46,47 @@ class InMemoryDocumentsRepository:
     async def get_by_id(self, document_id: UUID) -> DocumentRecord | None:
         document = self._store.documents.get(document_id)
         return document.model_copy(deep=True) if document else None
+
+    async def create(
+        self,
+        *,
+        document_id: UUID,
+        filename: str,
+        file_type: str,
+        size_bytes: int,
+        storage_path: str,
+        checksum: str,
+        uploaded_at: datetime,
+    ) -> None:
+        self._store.documents[document_id] = DocumentRecord(
+            id=document_id,
+            filename=filename,
+            file_type=file_type,
+            size_bytes=size_bytes,
+            storage_path=storage_path,
+            checksum=checksum,
+            uploaded_at=uploaded_at,
+        )
+        self._store.document_order[document_id] = next(self._store._sequence)
+
+    async def list_documents(self, *, limit: int, offset: int) -> tuple[list[DocumentRecord], int]:
+        # Los documentos sembrados directamente en el store no tienen orden de inserción (-1).
+        matches = sorted(
+            self._store.documents.values(),
+            key=lambda d: (d.uploaded_at, self._store.document_order.get(d.id, -1)),
+            reverse=True,
+        )
+        page = matches[offset : offset + limit]
+        return [document.model_copy(deep=True) for document in page], len(matches)
+
+    async def delete(self, document_id: UUID) -> None:
+        if document_id not in self._store.documents:
+            raise DocumentNotFound()
+        # Replica la FK `on delete restrict` de `generations.document_id`.
+        if any(record.document_id == document_id for record in self._store.generations.values()):
+            raise DocumentInUse()
+        del self._store.documents[document_id]
+        self._store.document_order.pop(document_id, None)
 
 
 class InMemoryGenerationsRepository:
@@ -102,6 +144,21 @@ class InMemoryGenerationsRepository:
         matches.sort(key=lambda r: (r.created_at, self._store.insertion_order[r.id]), reverse=True)
         page = matches[offset : offset + limit]
         return [record.model_copy(deep=True) for record in page], len(matches)
+
+    async def ids_by_document(
+        self,
+        document_id: UUID,
+        *,
+        statuses: Collection[GenerationStatus] | None,
+        limit: int,
+    ) -> tuple[list[UUID], int]:
+        matches = [
+            record
+            for record in self._store.generations.values()
+            if record.document_id == document_id and (statuses is None or record.status in statuses)
+        ]
+        matches.sort(key=lambda r: (r.created_at, self._store.insertion_order[r.id]), reverse=True)
+        return [record.id for record in matches[:limit]], len(matches)
 
     async def update_generation_status(
         self,

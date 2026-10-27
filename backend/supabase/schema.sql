@@ -293,3 +293,11 @@ revoke execute on function public.create_generation(uuid, boolean, text, jsonb) 
 revoke execute on function public.delete_generation_if_final(uuid) from public, anon, authenticated;
 grant execute on function public.create_generation(uuid, boolean, text, jsonb) to service_role;
 grant execute on function public.delete_generation_if_final(uuid) to service_role;
+
+-- -----------------------------------------------------------------------------
+-- Storage: bucket privado para POST /api/v1/documents (DOCUMENTS_BUCKET).
+-- service_role bypasa RLS; sin políticas para anon/authenticated.
+-- -----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('docs_testgen', 'docs_testgen', false)
+on conflict (id) do nothing;

@@ -20,6 +20,26 @@ class DocumentNotFound(AppError):
     default_message = "El documento indicado no existe."
 
 
+class DocumentInUse(AppError):
+    code = "DOCUMENT_IN_USE"
+    default_message = "El documento tiene generaciones asociadas y no puede eliminarse."
+
+
+class InvalidDocumentUpload(AppError):
+    code = "VALIDATION_ERROR"
+    default_message = "El archivo está vacío."
+
+
+class PayloadTooLarge(AppError):
+    code = "PAYLOAD_TOO_LARGE"
+    default_message = "El archivo supera el tamaño máximo permitido."
+
+
+class UnsupportedMediaType(AppError):
+    code = "UNSUPPORTED_MEDIA_TYPE"
+    default_message = "Tipo de archivo no soportado. Use TXT, PDF o DOCX."
+
+
 class GenerationNotFound(AppError):
     code = "GENERATION_NOT_FOUND"
     default_message = "La generación indicada no existe."
