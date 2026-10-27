@@ -1,9 +1,9 @@
 /**
  * Datos ficticios SOLO para la demostración visual.
- * Se reemplazan por datos reales cuando exista el backend.
+ * Hoy solo los usa el detalle de historial (`getExecutionPipeline`); se retiran en la Fase 2.
  */
 import { getStageDefinitions } from '../utils/stageDefinitions';
-import type { ExecutionStage, ExecutionStatus, RecentExecution } from '../types';
+import type { ExecutionStage, ExecutionStatus } from '../types';
 
 /** Construye etapas de ejemplo: las primeras completadas, una en proceso y el resto pendientes. */
 export function buildMockStages(
@@ -33,10 +33,3 @@ export function buildMockStages(
     };
   });
 }
-
-export const MOCK_RECENT_EXECUTIONS: RecentExecution[] = [
-  { id: 'exec-103', documentName: 'historias_usuario_pagos_v2.pdf', createdAt: '2026-10-16T16:42:00', status: 'in_progress' },
-  { id: 'exec-102', documentName: 'requisitos_modulo_reservas.docx', createdAt: '2026-10-15T11:05:00', status: 'completed' },
-  { id: 'exec-101', documentName: 'backlog_sprint_4.txt', createdAt: '2026-10-13T09:18:00', status: 'failed' },
-  { id: 'exec-100', documentName: 'historias_login.pdf', createdAt: '2026-10-10T18:30:00', status: 'completed' },
-];

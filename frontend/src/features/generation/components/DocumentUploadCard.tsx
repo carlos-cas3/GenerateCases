@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react';
-import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
+import type { ChangeEvent, DragEvent, KeyboardEvent, ReactNode } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -30,8 +30,12 @@ export interface DocumentUploadCardProps {
   isSubmitting?: boolean;
   /** Deshabilita todo el formulario (p. ej. hay otra ejecución activa). */
   disabled?: boolean;
+  /** Solo deshabilita el botón de envío (p. ej. ya hay una ejecución en seguimiento). */
+  submitDisabled?: boolean;
   /** Error externo (p. ej. del backend) mostrado bajo la zona de carga. */
   errorMessage?: string;
+  /** Aviso informativo visible sobre la zona de carga. */
+  notice?: ReactNode;
   maxSizeMB?: number;
   sx?: SxProps<Theme>;
 }
@@ -62,7 +66,9 @@ export function DocumentUploadCard({
   onSubmit,
   isSubmitting = false,
   disabled = false,
+  submitDisabled = false,
   errorMessage,
+  notice,
   maxSizeMB = DEFAULT_MAX_SIZE_MB,
   sx,
 }: DocumentUploadCardProps) {
@@ -73,7 +79,7 @@ export function DocumentUploadCard({
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const locked = disabled || isSubmitting;
-  const canSubmit = !!file && !validationError && !locked;
+  const canSubmit = !!file && !validationError && !locked && !submitDisabled;
   const shownError = validationError ?? errorMessage;
 
   const openPicker = () => !locked && inputRef.current?.click();
@@ -115,6 +121,12 @@ export function DocumentUploadCard({
       sx={sx}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, flex: 1 }}>
+        {notice && (
+          <Alert severity="info" variant="outlined">
+            {notice}
+          </Alert>
+        )}
+
         <input
           ref={inputRef}
           type="file"

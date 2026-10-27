@@ -1,0 +1,1287 @@
+openapi: 3.1.0
+info:
+  title: TestGen API
+  version: 2.0.0
+  summary: Carga de historias de usuario, generación asincrónica de casos de prueba funcionales y consulta de resultados, trazabilidad y métricas.
+  description: |
+    API REST del backend de TestGen (FastAPI + Supabase). La consume el frontend React; las
+    credenciales privilegiadas de Supabase permanecen únicamente en el servidor.
+
+    Todas las operaciones van prefijadas con `/api/v1`. FastAPI publica el esquema en
+    `/openapi.json` y Swagger UI en `/docs`; este archivo es el contrato versionado en
+    `docs/openapi.yaml`.
+
+    ## Alineación con la base de datos (`docs/database.md`)
+
+    | Recurso API | Tabla(s) |
+    |---|---|
+    | Document | `documents` |
+    | Generation | `generations` + `generation_stages` |
+    | UserStory | `user_stories` |
+    | Requirement | `functional_requirements` + `user_story_requirements` |
+    | Cluster | `clusters` + `cluster_requirements` |
+    | TestCase / TestStep | `test_cases` / `test_steps` |
+    | Traceability | `user_story_requirements` + `requirement_test_cases` |
+    | Metric / Finding | `generation_metrics` / `metric_findings` |
+
+    ## Flujo de uso
+
+    1. `POST /documents` sube el archivo (Storage + metadatos).
+    2. `POST /generations` crea la ejecución (`queued`) y responde `202 Accepted`.
+    3. El pipeline P1–P7 corre fuera de la petición HTTP y persiste su avance.
+    4. El cliente hace polling sobre `GET /generations/{generation_id}`.
+    5. Cuando la generación está `completed`, consulta los resultados, la trazabilidad y las métricas.
+
+    ## Convenciones
+
+    - **Estados de generación:** `queued`, `running`, `completed`, `failed`.
+    - **Estados de etapa (P1–P7):** `pending`, `running`, `completed`, `failed`, `skipped`.
+    - **Estados de relación RF–CP:** `pending`, `validated`, `rejected`. Una relación propuesta
+      por el LLM (`pending`) **no** cuenta como cobertura; solo `validated` lo hace.
+    - **Agrupamiento ≠ cobertura:** pertenecer a un cluster no implica que un caso de prueba
+      cubra el requisito.
+    - **Resultados parciales:** los endpoints de resultados devuelven lo que esté persistido.
+      Si la generación aún no terminó, o el clustering está deshabilitado, las listas pueden
+      venir vacías (no es un error).
+    - **Paginación:** `limit` (1–100, por defecto 20) y `offset`.
+    - **Errores:** formato común `{ "error": { "code", "message", "details" } }`.
+    - **Etapas:** si una etapa falla, queda en `failed`, las siguientes permanecen en `pending`
+      y la generación termina en `failed`. `skipped` solo se usa para etapas omitidas por el
+      flujo: P3 y P4 con clustering deshabilitado, y P7 mientras no esté implementada. El
+      detalle de cada etapa está en `docs/pipeline-orchestration.md`.
+    - Los endpoints marcados con `x-status: proposed` son extensiones propuestas que aún no
+      figuran en el README.
+  contact:
+    name: TestGen
+servers:
+  - url: /
+    description: Host donde está desplegada la API
+tags:
+  - name: Health
+    description: Estado del servicio.
+  - name: Documents
+    description: Carga, registro, consulta y eliminación de documentos con historias de usuario.
+  - name: Generations
+    description: Creación y seguimiento de las ejecuciones del pipeline P1–P7.
+  - name: Results
+    description: Historias de usuario, requisitos, clusters y casos de prueba persistidos por generación.
+  - name: Traceability
+    description: Relaciones HU–RF–CP y validación de la cobertura.
+  - name: Metrics
+    description: Métricas de evaluación y hallazgos por generación.
+paths:
+  /api/v1/health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Comprobar el estado del servicio
+      responses:
+        "200":
+          description: Servicio operativo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+              example:
+                status: ok
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/documents:
+    post:
+      tags: [Documents]
+      operationId: createDocument
+      summary: Subir un documento de historias de usuario
+      description: |
+        Recibe un archivo `TXT`, `PDF` o `DOCX` mediante `multipart/form-data`, valida tipo y
+        tamaño, lo guarda en el bucket privado de Supabase Storage y registra sus metadatos en
+        `documents`. La API nunca expone `storage_path` ni URLs permanentes.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Archivo TXT, PDF o DOCX. Tamaño máximo de 20 MiB (`MAX_UPLOAD_SIZE_BYTES`).
+      responses:
+        "201":
+          description: Documento validado y registrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+              example:
+                id: 6f9d1c2e-0a4b-4c8d-9e1f-2b3c4d5e6f70
+                filename: historias-release-1.txt
+                file_type: txt
+                size_bytes: 4821
+                checksum: 9b74c9897bac770ffc029102a200c5de
+                uploaded_at: "2026-10-25T12:00:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    get:
+      tags: [Documents]
+      operationId: listDocuments
+      summary: Listar documentos
+      description: Ordenados por `uploaded_at` descendente. Un documento puede reutilizarse en varias generaciones.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Lista paginada de documentos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/documents/{document_id}:
+    parameters:
+      - $ref: "#/components/parameters/DocumentId"
+    get:
+      tags: [Documents]
+      operationId: getDocument
+      summary: Consultar un documento
+      responses:
+        "200":
+          description: Documento encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+        "404":
+          $ref: "#/components/responses/DocumentNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    delete:
+      tags: [Documents]
+      operationId: deleteDocument
+      summary: Eliminar un documento
+      description: |
+        Elimina el registro y su archivo en Storage. No se permite mientras existan
+        generaciones activas (`queued` o `running`) que dependan del documento. Las políticas
+        de borrado respecto a generaciones ya finalizadas siguen pendientes de definición
+        (ver `database.md`, decisión 8).
+      responses:
+        "204":
+          description: Documento eliminado.
+        "404":
+          $ref: "#/components/responses/DocumentNotFound"
+        "409":
+          description: El documento tiene generaciones que dependen de él.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: DOCUMENT_IN_USE
+                  message: El documento tiene generaciones activas y no puede eliminarse.
+                  details:
+                    generation_ids: [b7a2f9c4-8e31-4f6a-9d2c-1a5e7f0b3c88]
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations:
+    post:
+      tags: [Generations]
+      operationId: createGeneration
+      summary: Crear una generación a partir de un documento
+      description: |
+        Valida el documento, registra la generación (`queued`) con su configuración
+        (`clustering_enabled`, `method_type` y copia en `config_snapshot`) y sus siete etapas
+        en `pending`, y programa el pipeline. La respuesta es inmediata (`202 Accepted`); el
+        progreso se consulta con polling sobre `GET /generations/{generation_id}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGenerationRequest"
+            example:
+              document_id: 6f9d1c2e-0a4b-4c8d-9e1f-2b3c4d5e6f70
+              configuration:
+                semantic_clustering_enabled: true
+      responses:
+        "202":
+          description: Generación creada y encolada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Generation"
+              example:
+                id: b7a2f9c4-8e31-4f6a-9d2c-1a5e7f0b3c88
+                document_id: 6f9d1c2e-0a4b-4c8d-9e1f-2b3c4d5e6f70
+                document_name: historias-release-1.txt
+                status: queued
+                configuration:
+                  semantic_clustering_enabled: true
+                  method_type: llm_pipeline
+                stages:
+                  - { key: p1, name: Normalización de historias de usuario, status: pending, error_message: null, started_at: null, completed_at: null, order: 1 }
+                  - { key: p2, name: Extracción de requisitos funcionales, status: pending, error_message: null, started_at: null, completed_at: null, order: 2 }
+                  - { key: p3, name: Generación de embeddings, status: pending, error_message: null, started_at: null, completed_at: null, order: 3 }
+                  - { key: p4, name: Clustering semántico, status: pending, error_message: null, started_at: null, completed_at: null, order: 4 }
+                  - { key: p5, name: Construcción de contexto estructurado, status: pending, error_message: null, started_at: null, completed_at: null, order: 5 }
+                  - { key: p6, name: Generación de casos de prueba funcionales, status: pending, error_message: null, started_at: null, completed_at: null, order: 6 }
+                  - { key: p7, name: Evaluación de resultados, status: pending, error_message: null, started_at: null, completed_at: null, order: 7 }
+                summary: null
+                error_message: null
+                created_at: "2026-10-25T12:05:00Z"
+                started_at: null
+                completed_at: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/DocumentNotFound"
+        "503":
+          description: Falló la comprobación previa de las dependencias de IA (LLM o embeddings). La generación quedó registrada como `failed` y su id viene en `details.generation_id`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: AI_SERVICE_UNAVAILABLE
+                  message: No se pudo iniciar la ejecución en el servicio de IA.
+                  details:
+                    generation_id: b7a2f9c4-8e31-4f6a-9d2c-1a5e7f0b3c88
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    get:
+      tags: [Generations]
+      operationId: listGenerations
+      summary: Listar generaciones
+      description: Ordenadas por `created_at` descendente. Con `limit=3` se obtienen las tres últimas ejecuciones.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: document_id
+          in: query
+          required: false
+          description: Filtra las generaciones de un documento.
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          description: Filtra por estado.
+          schema:
+            $ref: "#/components/schemas/GenerationStatus"
+      responses:
+        "200":
+          description: Lista paginada de generaciones.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}:
+    parameters:
+      - $ref: "#/components/parameters/GenerationId"
+    get:
+      tags: [Generations]
+      operationId: getGeneration
+      summary: Consultar estado y detalle de una generación
+      description: |
+        Devuelve estado, configuración, etapas, error y un `summary` con conteos calculados a
+        partir de los datos persistidos (no simulados). Es el punto de polling.
+      responses:
+        "200":
+          description: Generación encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Generation"
+              example:
+                id: b7a2f9c4-8e31-4f6a-9d2c-1a5e7f0b3c88
+                document_id: 6f9d1c2e-0a4b-4c8d-9e1f-2b3c4d5e6f70
+                document_name: historias-release-1.txt
+                status: completed
+                configuration:
+                  semantic_clustering_enabled: true
+                  method_type: llm_pipeline
+                stages:
+                  - { key: p1, name: Normalización de historias de usuario, status: completed, error_message: null, started_at: "2026-10-25T12:05:01Z", completed_at: "2026-10-25T12:05:02Z", order: 1 }
+                  - { key: p2, name: Extracción de requisitos funcionales, status: completed, error_message: null, started_at: "2026-10-25T12:05:02Z", completed_at: "2026-10-25T12:06:10Z", order: 2 }
+                  - { key: p3, name: Generación de embeddings, status: completed, error_message: null, started_at: "2026-10-25T12:06:10Z", completed_at: "2026-10-25T12:06:40Z", order: 3 }
+                  - { key: p4, name: Clustering semántico, status: completed, error_message: null, started_at: "2026-10-25T12:06:40Z", completed_at: "2026-10-25T12:06:45Z", order: 4 }
+                  - { key: p5, name: Construcción de contexto estructurado, status: completed, error_message: null, started_at: "2026-10-25T12:06:45Z", completed_at: "2026-10-25T12:06:46Z", order: 5 }
+                  - { key: p6, name: Generación de casos de prueba funcionales, status: completed, error_message: null, started_at: "2026-10-25T12:06:46Z", completed_at: "2026-10-25T12:09:30Z", order: 6 }
+                  - { key: p7, name: Evaluación de resultados, status: completed, error_message: null, started_at: "2026-10-25T12:09:30Z", completed_at: "2026-10-25T12:09:40Z", order: 7 }
+                summary:
+                  user_stories_count: 12
+                  requirements_count: 30
+                  clusters_count: 5
+                  test_cases_count: 48
+                  validated_relations_count: 40
+                  metrics:
+                    - { metric_name: requirement_coverage, metric_value: 0.83, formula_version: v1 }
+                error_message: null
+                created_at: "2026-10-25T12:05:00Z"
+                started_at: "2026-10-25T12:05:01Z"
+                completed_at: "2026-10-25T12:09:40Z"
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+    delete:
+      tags: [Generations]
+      operationId: deleteGeneration
+      summary: Eliminar una generación
+      description: |
+        Elimina la generación y sus datos dependientes (etapas, historias, requisitos,
+        clusters, casos, pasos, relaciones, métricas y hallazgos). No elimina el documento
+        original. No se permite mientras la generación está `queued` o `running`.
+      responses:
+        "204":
+          description: Generación eliminada.
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "409":
+          description: La generación está en procesamiento.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: GENERATION_IN_PROGRESS
+                  message: La generación está en procesamiento y no puede eliminarse.
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/events:
+    get:
+      tags: [Generations]
+      operationId: getGenerationEvents
+      summary: Recibir progreso en tiempo real por SSE (planificado)
+      description: |
+        **Reservado; responde `501` hasta que exista un mecanismo real de ejecución y
+        persistencia de eventos.** Mientras tanto, usar polling sobre
+        `GET /api/v1/generations/{generation_id}`.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+      responses:
+        "501":
+          description: SSE aún no implementado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: NOT_IMPLEMENTED
+                  message: La transmisión de eventos SSE está planificada. Use polling sobre GET /api/v1/generations/{generation_id}.
+
+  /api/v1/generations/{generation_id}/user-stories:
+    get:
+      tags: [Results]
+      operationId: listUserStories
+      summary: Listar historias de usuario procesadas
+      description: Fuente - tabla `user_stories`, con los `requirement_ids` obtenidos de `user_story_requirements`.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Lista paginada de historias de usuario.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserStoryList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/requirements:
+    get:
+      tags: [Results]
+      operationId: listRequirements
+      summary: Listar requisitos funcionales extraídos
+      description: Fuente - `functional_requirements`, con `user_story_ids` obtenidos de `user_story_requirements`.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Lista paginada de requisitos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/clusters:
+    get:
+      tags: [Results]
+      operationId: listClusters
+      summary: Consultar grupos semánticos y sus requisitos
+      description: |
+        Combina `clusters` y `cluster_requirements`. Si la generación se ejecutó con
+        `semantic_clustering_enabled=false`, `items` viene vacío. La pertenencia a un grupo
+        no implica cobertura por un caso de prueba.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+      responses:
+        "200":
+          description: Grupos de la generación.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClusterList"
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/test-cases:
+    get:
+      tags: [Results]
+      operationId: listTestCases
+      summary: Listar casos de prueba generados
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: requirement_id
+          in: query
+          required: false
+          description: Devuelve solo los casos relacionados con este requisito (cualquier estado de relación).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Lista paginada de casos de prueba (resumen).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestCaseList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/test-cases/{test_case_id}:
+    get:
+      tags: [Results]
+      operationId: getTestCase
+      summary: Consultar un caso de prueba con sus pasos y requisitos relacionados
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - $ref: "#/components/parameters/TestCaseId"
+      responses:
+        "200":
+          description: Caso de prueba encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestCase"
+              example:
+                id: 0c1d2e3f-4a5b-6c7d-8e9f-a0b1c2d3e4f5
+                code: CP-001
+                title: Inicio de sesión con credenciales válidas
+                objective: Verificar que un usuario registrado accede al sistema.
+                preconditions: ["El usuario está registrado", "El usuario está activo"]
+                test_data: { email: usuario@ejemplo.com, password: Valida123 }
+                expected_result: El sistema muestra el panel principal.
+                steps_count: 2
+                requirement_ids: [3a4b5c6d-7e8f-4a1b-9c2d-3e4f5a6b7c8d]
+                created_at: "2026-10-25T12:08:00Z"
+                steps:
+                  - { id: 5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9, step_number: 1, action: Ingresar correo y contraseña, expected_result: Los campos aceptan los valores }
+                  - { id: 6f7a8b9c-0d1e-4f2a-b3c4-d5e6f7a8b9c0, step_number: 2, action: Pulsar "Iniciar sesión", expected_result: Se muestra el panel principal }
+                requirements:
+                  - { requirement_id: 3a4b5c6d-7e8f-4a1b-9c2d-3e4f5a6b7c8d, requirement_code: RF-001, relation_status: validated, validation_method: manual, validation_notes: null }
+        "404":
+          $ref: "#/components/responses/TestCaseNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/traceability:
+    get:
+      tags: [Traceability]
+      operationId: getTraceability
+      summary: Consultar la trazabilidad HU–RF–CP
+      description: |
+        Una fila por requisito funcional, con las historias de origen y los casos de prueba
+        relacionados junto con el estado de cada relación. `covered` es `true` solo si el
+        requisito tiene al menos una relación `validated`; las relaciones `pending` o
+        `rejected` no cuentan como cobertura.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: covered
+          in: query
+          required: false
+          description: Si es `false`, devuelve solo requisitos sin relación validada.
+          schema:
+            type: boolean
+        - name: relation_status
+          in: query
+          required: false
+          description: Devuelve los requisitos que tengan al menos una relación en este estado.
+          schema:
+            $ref: "#/components/schemas/RelationStatus"
+      responses:
+        "200":
+          description: Trazabilidad paginada por requisito.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TraceabilityList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/requirements/{requirement_id}/test-cases/{test_case_id}:
+    patch:
+      tags: [Traceability]
+      operationId: updateRequirementTestCaseRelation
+      x-status: proposed
+      summary: Validar o rechazar una relación RF–CP
+      description: |
+        **Extensión propuesta.** Actualiza `requirement_test_cases` (estado, método y notas
+        de validación). Necesaria para el paso 7 del orden de implementación de
+        `database.md`. Solo las relaciones `validated` cuentan como cobertura confirmada.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - $ref: "#/components/parameters/RequirementId"
+        - $ref: "#/components/parameters/TestCaseId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRelationRequest"
+            example:
+              relation_status: validated
+              validation_method: manual
+              validation_notes: El caso verifica el flujo principal del requisito.
+      responses:
+        "200":
+          description: Relación actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementTestCaseRelation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: No existe la generación o la relación indicada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: RELATION_NOT_FOUND
+                  message: No existe una relación entre el requisito y el caso de prueba en esta generación.
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/metrics:
+    get:
+      tags: [Metrics]
+      operationId: listMetrics
+      summary: Listar métricas calculadas para la generación
+      description: |
+        Fuente - `generation_metrics`. Métricas candidatas iniciales: cobertura de
+        requisitos, redundancia semántica y completitud estructural (fórmulas y umbrales aún
+        por definir). Con `latest_only=true` (por defecto) devuelve solo el cálculo más
+        reciente por `metric_name`.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - name: latest_only
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: Métricas de la generación.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricList"
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/metrics/{metric_name}:
+    get:
+      tags: [Metrics]
+      operationId: getMetric
+      summary: Consultar el detalle de una métrica
+      description: Devuelve el cálculo más reciente de la métrica (o el de `formula_version`, si se indica) junto con sus hallazgos.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - $ref: "#/components/parameters/MetricName"
+        - name: formula_version
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Métrica encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricDetail"
+        "404":
+          description: No existe la generación o la métrica no se ha calculado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: METRIC_NOT_FOUND
+                  message: La métrica indicada no existe para esta generación.
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/generations/{generation_id}/findings:
+    get:
+      tags: [Metrics]
+      operationId: listFindings
+      summary: Listar hallazgos de evaluación
+      description: Fuente - `metric_findings` unido a `generation_metrics`.
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: severity
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FindingSeverity"
+        - name: metric_name
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lista paginada de hallazgos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/GenerationNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Máximo de elementos a devolver.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Offset:
+      name: offset
+      in: query
+      required: false
+      description: Elementos a omitir desde el inicio.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    DocumentId:
+      name: document_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GenerationId:
+      name: generation_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RequirementId:
+      name: requirement_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TestCaseId:
+      name: test_case_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MetricName:
+      name: metric_name
+      in: path
+      required: true
+      description: Nombre de la métrica (`generation_metrics.metric_name`).
+      schema:
+        type: string
+      example: requirement_coverage
+
+  responses:
+    BadRequest:
+      description: Parámetros, cuerpo o archivo inválidos.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: La solicitud contiene datos inválidos.
+              details:
+                - { path: file, message: Es requerido un archivo en el campo file. }
+    PayloadTooLarge:
+      description: El archivo supera el tamaño máximo permitido.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: PAYLOAD_TOO_LARGE, message: El archivo supera el tamaño máximo de 20 MiB. }
+    UnsupportedMediaType:
+      description: Tipo de archivo no soportado (se aceptan TXT, PDF y DOCX).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: UNSUPPORTED_MEDIA_TYPE, message: Tipo de archivo no soportado. Use TXT, PDF o DOCX. }
+    DocumentNotFound:
+      description: No existe el documento.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: DOCUMENT_NOT_FOUND, message: El documento indicado no existe. }
+    GenerationNotFound:
+      description: No existe la generación.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: GENERATION_NOT_FOUND, message: La generación indicada no existe. }
+    TestCaseNotFound:
+      description: No existe la generación o el caso de prueba no pertenece a ella.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: TEST_CASE_NOT_FOUND, message: El caso de prueba indicado no existe en esta generación. }
+    InternalServerError:
+      description: Error interno inesperado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: { code: INTERNAL_ERROR, message: Ocurrió un error interno. }
+
+  schemas:
+    # ---------- Comunes ----------
+    Error:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Código estable de error para el cliente.
+          examples:
+            - VALIDATION_ERROR
+            - DOCUMENT_NOT_FOUND
+            - GENERATION_NOT_FOUND
+            - TEST_CASE_NOT_FOUND
+            - METRIC_NOT_FOUND
+            - RELATION_NOT_FOUND
+            - NOT_FOUND
+            - METHOD_NOT_ALLOWED
+            - DOCUMENT_IN_USE
+            - GENERATION_IN_PROGRESS
+            - PAYLOAD_TOO_LARGE
+            - UNSUPPORTED_MEDIA_TYPE
+            - AI_SERVICE_UNAVAILABLE
+            - NOT_IMPLEMENTED
+            - INTERNAL_ERROR
+        message:
+          type: string
+        details:
+          description: Información adicional segura para el cliente.
+          anyOf:
+            - type: object
+            - type: array
+              items: {}
+    Pagination:
+      type: object
+      required: [limit, offset, total]
+      properties:
+        limit: { type: integer }
+        offset: { type: integer }
+        total: { type: integer, description: Total de elementos disponibles. }
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+
+    # ---------- Documentos ----------
+    Document:
+      type: object
+      description: Tabla `documents`. `storage_path` no se expone.
+      required: [id, filename, file_type, size_bytes, checksum, uploaded_at]
+      properties:
+        id: { type: string, format: uuid }
+        filename: { type: string, description: Nombre del archivo original. }
+        file_type:
+          type: string
+          enum: [txt, pdf, docx]
+        size_bytes: { type: integer, minimum: 0 }
+        checksum: { type: string, description: Huella digital del contenido. }
+        uploaded_at: { type: string, format: date-time }
+    DocumentList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Document" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    # ---------- Generaciones ----------
+    GenerationStatus:
+      type: string
+      enum: [queued, running, completed, failed]
+    StageStatus:
+      type: string
+      enum: [pending, running, completed, failed, skipped]
+      description: |
+        `skipped`: etapa omitida por una condición del flujo (P3 y P4 con clustering
+        deshabilitado; P7 mientras no esté implementada). Si una etapa falla, las posteriores
+        quedan en `pending`, no en `skipped`.
+    GenerationConfiguration:
+      type: object
+      description: |
+        Parámetros de la ejecución. `semantic_clustering_enabled` se persiste en
+        `generations.clustering_enabled` y `method_type` en `generations.method_type`; el
+        conjunto completo aplicado queda en `config_snapshot`.
+      properties:
+        semantic_clustering_enabled:
+          type: boolean
+          default: true
+          description: Habilita P3 y P4. Si es `false`, ambas se marcan `skipped`.
+        method_type:
+          type: string
+          description: Método de generación utilizado. Los valores admitidos están pendientes de definición.
+      additionalProperties: false
+    CreateGenerationRequest:
+      type: object
+      required: [document_id]
+      additionalProperties: false
+      properties:
+        document_id: { type: string, format: uuid }
+        configuration: { $ref: "#/components/schemas/GenerationConfiguration" }
+    GenerationStage:
+      type: object
+      description: Tabla `generation_stages`. El `name` proviene de un catálogo del código y no se almacena.
+      required: [key, name, status, order]
+      properties:
+        key:
+          type: string
+          enum: [p1, p2, p3, p4, p5, p6, p7]
+        name: { type: string }
+        status: { $ref: "#/components/schemas/StageStatus" }
+        error_message: { type: [string, "null"] }
+        started_at: { type: [string, "null"], format: date-time }
+        completed_at: { type: [string, "null"], format: date-time }
+        order: { type: integer, minimum: 1, maximum: 7 }
+    MetricSummary:
+      type: object
+      required: [metric_name, metric_value, formula_version]
+      properties:
+        metric_name: { type: string }
+        metric_value: { type: [number, "null"] }
+        formula_version: { type: string }
+    GenerationSummary:
+      type: object
+      description: Conteos calculados desde las tablas persistidas. Los campos son `null` mientras no haya datos.
+      properties:
+        user_stories_count: { type: [integer, "null"] }
+        requirements_count: { type: [integer, "null"] }
+        clusters_count: { type: [integer, "null"] }
+        test_cases_count: { type: [integer, "null"] }
+        validated_relations_count:
+          type: [integer, "null"]
+          description: Relaciones RF–CP en estado `validated`.
+        metrics:
+          type: array
+          items: { $ref: "#/components/schemas/MetricSummary" }
+    Generation:
+      type: object
+      description: Tabla `generations` + `generation_stages`.
+      required: [id, document_id, document_name, status, configuration, stages, summary, error_message, created_at, started_at, completed_at]
+      properties:
+        id: { type: string, format: uuid }
+        document_id: { type: string, format: uuid }
+        document_name: { type: string }
+        status: { $ref: "#/components/schemas/GenerationStatus" }
+        configuration: { $ref: "#/components/schemas/GenerationConfiguration" }
+        stages:
+          type: array
+          items: { $ref: "#/components/schemas/GenerationStage" }
+        summary:
+          oneOf:
+            - $ref: "#/components/schemas/GenerationSummary"
+            - type: "null"
+        error_message:
+          type: [string, "null"]
+          description: Error global cuando `status` es `failed`.
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+          description: Se registra al alcanzar un estado final (`completed` o `failed`).
+    GenerationList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Generation" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    # ---------- Historias y requisitos ----------
+    UserStory:
+      type: object
+      required: [id, code, original_text]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: [string, "null"], description: Único dentro de la generación cuando está definido. }
+        original_text: { type: string }
+        role: { type: [string, "null"] }
+        action: { type: [string, "null"] }
+        goal: { type: [string, "null"] }
+        validation_status:
+          type: [string, "null"]
+          description: Estado de validación de la historia. Los valores admitidos están pendientes de definición.
+        requirement_ids:
+          type: array
+          items: { type: string, format: uuid }
+    UserStoryList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/UserStory" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    Requirement:
+      type: object
+      required: [id, code, description]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, description: Único dentro de la generación. }
+        description: { type: string }
+        source_text: { type: [string, "null"], description: Fragmento que respalda la extracción. }
+        user_story_ids:
+          type: array
+          items: { type: string, format: uuid }
+    RequirementList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Requirement" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    # ---------- Clusters ----------
+    ClusterRequirement:
+      type: object
+      required: [requirement_id, code, description]
+      properties:
+        requirement_id: { type: string, format: uuid }
+        code: { type: string }
+        description: { type: string }
+        similarity_to_centroid:
+          type: [number, "null"]
+          description: |
+            Similitud respecto al centroide, si el algoritmo la calcula. Su significado exacto
+            depende de la implementación (decisión pendiente 3 de `database.md`).
+    Cluster:
+      type: object
+      required: [id, name, requirements]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        cluster_label: { type: [integer, "null"], description: Etiqueta numérica asignada por el algoritmo. }
+        requirements:
+          type: array
+          items: { $ref: "#/components/schemas/ClusterRequirement" }
+    ClusterList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Cluster" }
+
+    # ---------- Casos de prueba ----------
+    RelationStatus:
+      type: string
+      enum: [pending, validated, rejected]
+      description: |
+        `pending`: propuesta (p. ej. por el LLM), sin validar. `validated`: confirmada, cuenta
+        como cobertura. `rejected`: descartada.
+    TestStep:
+      type: object
+      required: [id, step_number, action]
+      properties:
+        id: { type: string, format: uuid }
+        step_number: { type: integer, minimum: 1, description: Único dentro del caso de prueba. }
+        action: { type: string }
+        expected_result: { type: [string, "null"] }
+    TestCaseSummary:
+      type: object
+      required: [id, code, title, steps_count, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, description: Único dentro de la generación. }
+        title: { type: string }
+        objective: { type: [string, "null"] }
+        expected_result: { type: [string, "null"] }
+        steps_count: { type: integer, minimum: 0 }
+        requirement_ids:
+          type: array
+          description: Requisitos relacionados (cualquier estado de relación).
+          items: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+    TestCaseRequirementLink:
+      type: object
+      required: [requirement_id, requirement_code, relation_status]
+      properties:
+        requirement_id: { type: string, format: uuid }
+        requirement_code: { type: string }
+        relation_status: { $ref: "#/components/schemas/RelationStatus" }
+        validation_method: { type: [string, "null"] }
+        validation_notes: { type: [string, "null"] }
+    TestCase:
+      allOf:
+        - $ref: "#/components/schemas/TestCaseSummary"
+        - type: object
+          required: [steps, requirements]
+          properties:
+            preconditions:
+              type: array
+              description: Lista de precondiciones (JSONB).
+              items: { type: string }
+            test_data:
+              type: [object, "null"]
+              description: Datos necesarios para ejecutar el caso (JSONB). Estructura libre; ver decisión pendiente 7.
+              additionalProperties: true
+            steps:
+              type: array
+              items: { $ref: "#/components/schemas/TestStep" }
+            requirements:
+              type: array
+              items: { $ref: "#/components/schemas/TestCaseRequirementLink" }
+    TestCaseList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/TestCaseSummary" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    # ---------- Trazabilidad ----------
+    TraceabilityUserStory:
+      type: object
+      required: [id, code]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: [string, "null"] }
+    TraceabilityTestCase:
+      type: object
+      required: [id, code, title, relation_status]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        title: { type: string }
+        relation_status: { $ref: "#/components/schemas/RelationStatus" }
+        validation_method: { type: [string, "null"] }
+        validation_notes: { type: [string, "null"] }
+    TraceabilityItem:
+      type: object
+      required: [requirement, user_stories, test_cases, covered]
+      properties:
+        requirement:
+          type: object
+          required: [id, code, description]
+          properties:
+            id: { type: string, format: uuid }
+            code: { type: string }
+            description: { type: string }
+        user_stories:
+          type: array
+          items: { $ref: "#/components/schemas/TraceabilityUserStory" }
+        test_cases:
+          type: array
+          items: { $ref: "#/components/schemas/TraceabilityTestCase" }
+        covered:
+          type: boolean
+          description: "`true` si hay al menos una relación `validated`."
+    TraceabilityList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/TraceabilityItem" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    UpdateRelationRequest:
+      type: object
+      required: [relation_status]
+      additionalProperties: false
+      properties:
+        relation_status: { $ref: "#/components/schemas/RelationStatus" }
+        validation_method:
+          type: string
+          description: Método utilizado para validar. Los valores admitidos están pendientes de definición.
+        validation_notes: { type: string }
+    RequirementTestCaseRelation:
+      type: object
+      required: [requirement_id, test_case_id, relation_status]
+      properties:
+        requirement_id: { type: string, format: uuid }
+        test_case_id: { type: string, format: uuid }
+        relation_status: { $ref: "#/components/schemas/RelationStatus" }
+        validation_method: { type: [string, "null"] }
+        validation_notes: { type: [string, "null"] }
+
+    # ---------- Métricas y hallazgos ----------
+    FindingSeverity:
+      type: string
+      enum: [info, warning, error]
+    Metric:
+      type: object
+      description: Tabla `generation_metrics`.
+      required: [id, metric_name, metric_value, formula_version, calculated_at]
+      properties:
+        id: { type: string, format: uuid }
+        metric_name: { type: string }
+        metric_value: { type: [number, "null"] }
+        numerator: { type: [number, "null"] }
+        denominator: { type: [number, "null"] }
+        formula_version: { type: string }
+        details:
+          type: [object, "null"]
+          description: Datos complementarios del cálculo (JSONB).
+          additionalProperties: true
+        calculated_at: { type: string, format: date-time }
+    MetricList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Metric" }
+    Finding:
+      type: object
+      description: Tabla `metric_findings`.
+      required: [id, generation_metric_id, metric_name, finding_code, severity, message, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        generation_metric_id: { type: string, format: uuid }
+        metric_name: { type: string }
+        finding_code: { type: string }
+        severity: { $ref: "#/components/schemas/FindingSeverity" }
+        message: { type: string }
+        evidence:
+          type: [object, "null"]
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+    FindingList:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Finding" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+    MetricDetail:
+      allOf:
+        - $ref: "#/components/schemas/Metric"
+        - type: object
+          required: [findings]
+          properties:
+            findings:
+              type: array
+              items: { $ref: "#/components/schemas/Finding" }

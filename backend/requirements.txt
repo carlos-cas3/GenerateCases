@@ -1,0 +1,14 @@
+# Runtime
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30
+pydantic>=2.7,<3.0
+pydantic-settings>=2.3
+supabase>=2.10,<3.0
+
+# Tests
+pytest>=8.2
+pytest-asyncio>=0.23
+httpx>=0.27
+pyyaml>=6.0
+jsonschema>=4.22
+rfc3339-validator>=0.1.4
