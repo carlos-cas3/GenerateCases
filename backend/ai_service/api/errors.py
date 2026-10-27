@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_service.core.errors import (
     AppError,
@@ -25,13 +26,25 @@ _STATUS_BY_ERROR: dict[type[AppError], int] = {
     FeatureNotImplemented: 501,
 }
 
+# Errores HTTP del framework (rutas inexistentes, métodos no permitidos, etc.).
+_HTTP_ERRORS: dict[int, tuple[str, str]] = {
+    404: ("NOT_FOUND", "El recurso solicitado no existe."),
+    405: ("METHOD_NOT_ALLOWED", "Método no permitido para este recurso."),
+}
+
 _LOCATION_PREFIXES = {"body", "query", "path", "header", "cookie"}
 
 
-def error_response(status_code: int, code: str, message: str, details: Any = None) -> JSONResponse:
+def error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    details: Any = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     """Construye una respuesta de error con el formato común."""
     body = {"error": {"code": code, "message": message, "details": details if details is not None else {}}}
-    return JSONResponse(status_code=status_code, content=jsonable_encoder(body))
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(body), headers=headers)
 
 
 def _validation_details(exc: RequestValidationError) -> list[dict[str, str]]:
@@ -58,6 +71,13 @@ async def _handle_app_error(request: Request, exc: AppError) -> JSONResponse:
     return error_response(status_code, exc.code, exc.message, exc.details)
 
 
+async def _handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Normaliza 404/405 y demás errores HTTP del framework, conservando estado y cabeceras."""
+    code, message = _HTTP_ERRORS.get(exc.status_code, ("HTTP_ERROR", "No se pudo procesar la solicitud."))
+    headers = dict(exc.headers) if exc.headers else None
+    return error_response(exc.status_code, code, message, headers=headers)
+
+
 async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Error no controlado en %s %s", request.method, request.url.path)
     return error_response(500, "INTERNAL_ERROR", "Ocurrió un error interno.")
@@ -67,4 +87,5 @@ def register_exception_handlers(app: FastAPI) -> None:
     """Registra los manejadores globales en la aplicación."""
     app.add_exception_handler(RequestValidationError, _handle_validation)  # type: ignore[arg-type]
     app.add_exception_handler(AppError, _handle_app_error)  # type: ignore[arg-type]
+    app.add_exception_handler(StarletteHTTPException, _handle_http_exception)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, _handle_unexpected)

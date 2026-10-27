@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "El recurso solicitado no existe.",
+    "details": {}
+  }
+}

@@ -12,26 +12,35 @@ import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
 import InsightsOutlinedIcon from "@mui/icons-material/InsightsOutlined";
 import { BaseCard } from "@/shared/components/BaseCard";
 import type { ExecutionStage, ExecutionStatus } from "../types";
+import { isFinalStage, stageProgress } from "../utils/stageProgress";
 import { StatusChip } from "@/shared/components/StatusChip";
 import { StatusIcon } from "@/shared/components/StatusIcon";
-import { STATUS_CONFIG, toneColor } from "@/shared/components/statusConfig";
+import { STAGE_STATUS_CONFIG, toneColor } from "@/shared/components/statusConfig";
 
 export interface ExecutionProgressCardProps {
-    /** Estado general. Si se omite, se deriva de las etapas. */
+    /** Estado general (el de la API). Si se omite, se deriva de las etapas. */
     status?: ExecutionStatus;
     stages: ExecutionStage[];
     isLoading?: boolean;
+    /** Error al CONSULTAR el progreso (comunicación), no un fallo de la ejecución. */
     errorMessage?: string;
     onRetry?: () => void;
-    /** Ids de etapas expandidas al inicio. */
+    /** El seguimiento perdió la conexión y está reintentando; se muestran los últimos datos conocidos. */
+    isReconnecting?: boolean;
+    /** Texto bajo la cabecera (p. ej. el nombre del documento). */
+    caption?: string;
+    /** Motivo del fallo de la ejecución informado por el backend. */
+    failureMessage?: string;
+    /** Ids de etapas expandidas al inicio (las fallidas se expanden siempre). */
     defaultExpandedIds?: string[];
     emptyMessage?: string;
     sx?: SxProps<Theme>;
 }
 
+/** Respaldo para quien no pasa `status` (p. ej. `ExecutionPipeline` del historial). */
 function deriveStatus(stages: ExecutionStage[]): ExecutionStatus {
     if (stages.some((s) => s.status === "failed")) return "failed";
-    if (stages.length > 0 && stages.every((s) => s.status === "completed"))
+    if (stages.length > 0 && stages.every((s) => isFinalStage(s.status)))
         return "completed";
     if (
         stages.some(
@@ -44,7 +53,7 @@ function deriveStatus(stages: ExecutionStage[]): ExecutionStatus {
 
 const OVERALL_LABEL: Record<ExecutionStatus, string> = {
     pending: "En espera",
-    in_progress: "En proceso",
+    in_progress: "En ejecución",
     completed: "Completada",
     failed: "Fallida",
 };
@@ -64,7 +73,7 @@ function StageRow({
 }) {
     const panelId = useId();
     const expandable = stage.details !== undefined && stage.details !== null;
-    const { label, tone } = STATUS_CONFIG[stage.status];
+    const { label, tone } = STAGE_STATUS_CONFIG[stage.status];
 
     const content = (
         <>
@@ -193,29 +202,29 @@ export function ExecutionProgressCard({
     isLoading = false,
     errorMessage,
     onRetry,
+    isReconnecting = false,
+    caption,
+    failureMessage,
     defaultExpandedIds = [],
     emptyMessage = "Aún no hay una ejecución en curso. Sube un documento para comenzar.",
     sx,
 }: ExecutionProgressCardProps) {
-    const [expandedIds, setExpandedIds] = useState<Set<string>>(
-        () => new Set(defaultExpandedIds),
-    );
+    // Etapas cuyo estado de expansión el usuario invirtió respecto al inicial.
+    const [toggledIds, setToggledIds] = useState<Set<string>>(() => new Set());
 
     const toggle = (id: string) =>
-        setExpandedIds((prev) => {
+        setToggledIds((prev) => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
             return next;
         });
+    const isExpanded = (stage: ExecutionStage) =>
+        (defaultExpandedIds.includes(stage.id) || stage.status === "failed") !==
+        toggledIds.has(stage.id);
 
     const overall = status ?? deriveStatus(stages);
-    const completedCount = stages.filter(
-        (s) => s.status === "completed",
-    ).length;
-    const percent = stages.length
-        ? Math.round((completedCount / stages.length) * 100)
-        : 0;
+    const progress = stageProgress(stages);
     const hasStages = stages.length > 0;
 
     return (
@@ -251,7 +260,7 @@ export function ExecutionProgressCard({
                         </Box>
                     ))}
                 </Box>
-            ) : errorMessage ? (
+            ) : errorMessage && !hasStages ? (
                 <Alert
                     severity="error"
                     variant="outlined"
@@ -292,6 +301,46 @@ export function ExecutionProgressCard({
                 <Box
                     sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}
                 >
+                    {caption && (
+                        <Typography
+                            variant="subtitle2"
+                            noWrap
+                            title={caption}
+                            sx={{ mb: -1 }}
+                        >
+                            {caption}
+                        </Typography>
+                    )}
+                    {isReconnecting && (
+                        <Alert severity="warning" variant="outlined">
+                            Reconectando con el servidor… Se muestra el último
+                            estado conocido.
+                        </Alert>
+                    )}
+                    {errorMessage && (
+                        <Alert
+                            severity="warning"
+                            variant="outlined"
+                            action={
+                                onRetry && (
+                                    <Button
+                                        color="inherit"
+                                        size="small"
+                                        onClick={onRetry}
+                                    >
+                                        Reintentar
+                                    </Button>
+                                )
+                            }
+                        >
+                            {errorMessage} Se muestra el último estado conocido.
+                        </Alert>
+                    )}
+                    {overall === "failed" && failureMessage && (
+                        <Alert severity="error" variant="outlined">
+                            {failureMessage}
+                        </Alert>
+                    )}
                     <Box>
                         <Box
                             sx={{
@@ -304,19 +353,21 @@ export function ExecutionProgressCard({
                                 variant="caption"
                                 color="text.secondary"
                             >
-                                {completedCount} de {stages.length} etapas
-                                completadas
+                                {progress.completed} completadas
+                                {progress.skipped > 0 &&
+                                    ` · ${progress.skipped} omitidas`}{" "}
+                                de {progress.total} etapas
                             </Typography>
                             <Typography
                                 variant="caption"
                                 color="text.secondary"
                             >
-                                {percent}%
+                                {progress.percent}%
                             </Typography>
                         </Box>
                         <LinearProgress
                             variant="determinate"
-                            value={percent}
+                            value={progress.percent}
                             color={
                                 overall === "failed"
                                     ? "error"
@@ -347,7 +398,7 @@ export function ExecutionProgressCard({
                                 stage={stage}
                                 index={i}
                                 isLast={i === stages.length - 1}
-                                expanded={expandedIds.has(stage.id)}
+                                expanded={isExpanded(stage)}
                                 onToggle={() => toggle(stage.id)}
                             />
                         ))}
