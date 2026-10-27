@@ -40,9 +40,14 @@ const LAYOUTS = {
     columns: { xs: '1fr', lg: 'minmax(0, 1fr) minmax(0, 2fr)' },
     areas: { xs: '"upload" "progress" "recent"', lg: '"upload progress" "recent recent"' },
   },
+  /** Carga y recientes apilados en la columna izquierda (50%); pipeline solo a la derecha (50%). */
+  uploadRecentLeft: {
+    columns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' },
+    areas: { xs: '"upload" "recent" "progress"', md: '"upload progress" "recent progress"' },
+  },
 } as const;
 
-const ACTIVE_LAYOUT: keyof typeof LAYOUTS = 'twoColumns';
+const ACTIVE_LAYOUT: keyof typeof LAYOUTS = 'uploadRecentLeft';
 
 const RECENT_EXECUTIONS_LIMIT = 3;
 /** La primera etapa arranca expandida (las fallidas se expanden siempre). */
