@@ -308,6 +308,8 @@ Las respuestas de error deben mantener un formato JSON común:
 
 El campo `details` puede incluir información adicional que sea segura para el cliente.
 
+Cualquier otro error HTTP del framework sin código propio se devuelve con su status original y el código genérico `HTTP_ERROR` (mensaje seguro, sin detalle interno). No se incluye en la tabla porque su status varía.
+
 | HTTP | Código | Uso |
 |---|---|---|
 | `400` | `VALIDATION_ERROR` | Parámetros o cuerpo de solicitud inválidos, si este es el contrato adoptado. |
@@ -316,6 +318,8 @@ El campo `details` puede incluir información adicional que sea segura para el c
 | `404` | `TEST_CASE_NOT_FOUND` | El caso de prueba no existe en la generación indicada. |
 | `404` | `METRIC_NOT_FOUND` | La métrica no se ha calculado para la generación. |
 | `404` | `RELATION_NOT_FOUND` | No existe la relación RF–CP indicada. |
+| `404` | `NOT_FOUND` | La ruta solicitada no existe en la API. |
+| `405` | `METHOD_NOT_ALLOWED` | El método HTTP no está permitido para la ruta (incluye la cabecera `Allow`). |
 | `409` | `DOCUMENT_IN_USE` | El documento tiene generaciones activas. |
 | `409` | `GENERATION_IN_PROGRESS` | La generación está en cola o en procesamiento. |
 | `413` | `PAYLOAD_TOO_LARGE` | El archivo supera el tamaño máximo permitido. |

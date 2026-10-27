@@ -858,6 +858,8 @@ components:
             - TEST_CASE_NOT_FOUND
             - METRIC_NOT_FOUND
             - RELATION_NOT_FOUND
+            - NOT_FOUND
+            - METHOD_NOT_ALLOWED
             - DOCUMENT_IN_USE
             - GENERATION_IN_PROGRESS
             - PAYLOAD_TOO_LARGE
