@@ -1,0 +1,80 @@
+{
+  "id": "d13a0432-552f-45c5-8920-da51076c6835",
+  "document_id": "6f9d1c2e-0a4b-4c8d-9e1f-2b3c4d5e6f70",
+  "document_name": "historias-release-1.txt",
+  "status": "failed",
+  "configuration": {
+    "semantic_clustering_enabled": true,
+    "method_type": "llm_pipeline"
+  },
+  "stages": [
+    {
+      "key": "p1",
+      "name": "Normalización de historias de usuario",
+      "status": "completed",
+      "error_message": null,
+      "started_at": "2026-10-26T23:25:26.316528Z",
+      "completed_at": "2026-10-26T23:25:26.380154Z",
+      "order": 1
+    },
+    {
+      "key": "p2",
+      "name": "Extracción de requisitos funcionales",
+      "status": "completed",
+      "error_message": null,
+      "started_at": "2026-10-26T23:25:26.380154Z",
+      "completed_at": "2026-10-26T23:25:26.427089Z",
+      "order": 2
+    },
+    {
+      "key": "p3",
+      "name": "Generación de embeddings",
+      "status": "completed",
+      "error_message": null,
+      "started_at": "2026-10-26T23:25:26.427089Z",
+      "completed_at": "2026-10-26T23:25:26.490245Z",
+      "order": 3
+    },
+    {
+      "key": "p4",
+      "name": "Clustering semántico",
+      "status": "failed",
+      "error_message": "La etapa 'Clustering semántico' falló durante la ejecución.",
+      "started_at": "2026-10-26T23:25:26.490245Z",
+      "completed_at": "2026-10-26T23:25:26.541697Z",
+      "order": 4
+    },
+    {
+      "key": "p5",
+      "name": "Construcción de contexto estructurado",
+      "status": "pending",
+      "error_message": null,
+      "started_at": null,
+      "completed_at": null,
+      "order": 5
+    },
+    {
+      "key": "p6",
+      "name": "Generación de casos de prueba funcionales",
+      "status": "pending",
+      "error_message": null,
+      "started_at": null,
+      "completed_at": null,
+      "order": 6
+    },
+    {
+      "key": "p7",
+      "name": "Evaluación de resultados",
+      "status": "pending",
+      "error_message": null,
+      "started_at": null,
+      "completed_at": null,
+      "order": 7
+    }
+  ],
+  "summary": null,
+  "error_message": "La generación falló en la etapa 'Clustering semántico'.",
+  "created_at": "2026-10-26T23:25:26.311756Z",
+  "started_at": "2026-10-26T23:25:26.315491Z",
+  "completed_at": "2026-10-26T23:25:26.541697Z"
+}
