@@ -156,7 +156,13 @@ def test_delete_missing_generation_returns_404(client: TestClient) -> None:
 def test_list_filters_order_and_pagination(client: TestClient, store: InMemoryStore) -> None:
     other_id = uuid4()
     store.documents[other_id] = DocumentRecord(
-        id=other_id, filename="otro.pdf", file_type="pdf", size_bytes=10, checksum="x", uploaded_at=BASE_TIME
+        id=other_id,
+        filename="otro.pdf",
+        file_type="pdf",
+        size_bytes=10,
+        storage_path=f"{other_id}/otro.pdf",
+        checksum="x",
+        uploaded_at=BASE_TIME,
     )
     g0 = add_generation(store, document_id=DOCUMENT_ID, status=GenerationStatus.COMPLETED, minutes=0)
     g1 = add_generation(store, document_id=DOCUMENT_ID, status=GenerationStatus.FAILED, minutes=1)

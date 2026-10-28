@@ -173,27 +173,41 @@ paths:
       operationId: deleteDocument
       summary: Eliminar un documento
       description: |
-        Elimina el registro y su archivo en Storage. No se permite mientras existan
-        generaciones activas (`queued` o `running`) que dependan del documento. Las políticas
-        de borrado respecto a generaciones ya finalizadas siguen pendientes de definición
-        (ver `database.md`, decisión 8).
+        Elimina el registro y su archivo en Storage. No se permite si existe alguna generación
+        que dependa del documento (activa o finalizada); en ese caso responde
+        `409 DOCUMENT_IN_USE` con los ids en `details.generation_ids` (máximo 50). Para eliminar
+        el documento, primero hay que eliminar sus generaciones. Regla que cierra la decisión 8
+        de `database.md`.
       responses:
         "204":
           description: Documento eliminado.
         "404":
           $ref: "#/components/responses/DocumentNotFound"
         "409":
-          description: El documento tiene generaciones que dependen de él.
+          description: |
+            El documento tiene generaciones que dependen de él. Si alguna está activa se
+            informan solo las activas; si no, las finalizadas. No se elimina nada.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  code: DOCUMENT_IN_USE
-                  message: El documento tiene generaciones activas y no puede eliminarse.
-                  details:
-                    generation_ids: [b7a2f9c4-8e31-4f6a-9d2c-1a5e7f0b3c88]
+              examples:
+                active:
+                  summary: Generaciones activas
+                  value:
+                    error:
+                      code: DOCUMENT_IN_USE
+                      message: El documento tiene generaciones activas y no puede eliminarse.
+                      details:
+                        generation_ids: [b7a2f9c4-8e31-4f6a-9d2c-1a5e7f0b3c88]
+                associated:
+                  summary: Solo generaciones finalizadas
+                  value:
+                    error:
+                      code: DOCUMENT_IN_USE
+                      message: El documento tiene generaciones asociadas y no puede eliminarse.
+                      details:
+                        generation_ids: [b7a2f9c4-8e31-4f6a-9d2c-1a5e7f0b3c88]
         "500":
           $ref: "#/components/responses/InternalServerError"
 

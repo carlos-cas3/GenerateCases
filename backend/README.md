@@ -203,10 +203,10 @@ Estos endpoints constituyen el contrato inicial. Su estado real debe comprobarse
 | Método | Endpoint | Responsabilidad |
 |---|---|---|
 | `GET` | `/api/v1/health` | Comprobar el estado del servicio. |
-| `POST` | `/api/v1/documents` | Subir un documento mediante `multipart/form-data`, utilizando el campo `file`. |
-| `GET` | `/api/v1/documents` | Listar documentos con paginación. |
-| `GET` | `/api/v1/documents/{document_id}` | Consultar metadatos y estado de un documento. |
-| `DELETE` | `/api/v1/documents/{document_id}` | Eliminar un documento y gestionar su archivo asociado. |
+| `POST` | `/api/v1/documents` | **Implementado (Fase 2).** Subir un TXT, PDF o DOCX (máx. 20 MiB) mediante `multipart/form-data`, campo `file`. Tipo validado por extensión; `checksum` SHA-256. |
+| `GET` | `/api/v1/documents` | **Implementado (Fase 2).** Listar documentos por `uploaded_at` descendente con paginación. |
+| `GET` | `/api/v1/documents/{document_id}` | **Implementado (Fase 2).** Consultar los metadatos de un documento. |
+| `DELETE` | `/api/v1/documents/{document_id}` | **Implementado (Fase 2).** Eliminar un documento sin generaciones y su archivo en Storage. |
 | `POST` | `/api/v1/generations` | Crear una generación para un documento existente. |
 | `GET` | `/api/v1/generations` | Listar generaciones con paginación. |
 | `GET` | `/api/v1/generations/{generation_id}` | Consultar estado, etapas, errores y resumen de una generación. |
@@ -234,7 +234,7 @@ No se necesita crear un endpoint por cada tabla. Una ruta puede consultar varias
 
 ### 4.3. Consideraciones de la API
 
-- **Eliminación de documentos:** no se debe eliminar un documento mientras existan generaciones activas que dependan de él (`409 DOCUMENT_IN_USE`). También se debe gestionar la eliminación del archivo en Storage.
+- **Eliminación de documentos:** no se elimina un documento que tenga **alguna** generación, activa o finalizada (`409 DOCUMENT_IN_USE` con `details.generation_ids`). Para borrarlo, primero hay que eliminar sus generaciones. Tras borrar la fila se elimina el archivo en Storage (best-effort: un fallo deja un objeto huérfano registrado en el log). Ver la decisión 8 de [`database.md`](docs/prompts_fases/Fase%201/database.md).
 - **Eliminación de generaciones:** deben eliminarse o gestionarse adecuadamente los registros dependientes, según las políticas de retención definidas.
 - **Independencia de los recursos:** eliminar una generación no debe eliminar automáticamente el documento original, ya que puede utilizarse en otras generaciones.
 - **Ejecuciones activas:** no se debe eliminar una generación mientras se encuentra en cola o en procesamiento (`409 GENERATION_IN_PROGRESS`). La cancelación puede incorporarse como una operación independiente.
@@ -417,6 +417,11 @@ pip install -r requirements.txt
 python -m ai_service.main
 ```
 
+Requisitos de Supabase para ejecutar en local (copia `.env.example` a `.env`):
+
+- `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` con las credenciales del proyecto.
+- `DOCUMENTS_BUCKET` (por defecto `docs_testgen`): bucket **privado** de Supabase Storage que debe existir antes de subir documentos (lo crea el final de `supabase/schema.sql`). Su límite de tamaño debe admitir al menos `MAX_UPLOAD_SIZE_BYTES` (20 MiB).
+
 El comando de instalación debe ajustarse al archivo de dependencias real del repositorio. Si la aplicación expone `app` en `ai_service/main.py`, también puede iniciarse con:
 
 ```bash
@@ -436,8 +441,8 @@ Esta sección distingue entre la estructura descrita como objetivo y las capacid
 | Componente | Estado documentado | Criterio para marcarlo como implementado |
 |---|---|---|
 | Aplicación FastAPI y endpoint de salud | Por verificar | La aplicación arranca y el endpoint responde con el contrato definido. |
-| Carga de documentos | Por verificar | Valida formato y tamaño, guarda el archivo en Storage y registra sus metadatos. |
-| Listado y consulta de documentos | Por verificar | Los endpoints consultan datos persistidos y aplican paginación. |
+| Carga de documentos | Implementado | Valida formato y tamaño, guarda el archivo en Storage y registra sus metadatos. |
+| Listado y consulta de documentos | Implementado | Los endpoints consultan datos persistidos y aplican paginación. |
 | Creación y consulta de generaciones | Por verificar | Registra una generación y permite consultar su estado persistido. |
 | Persistencia de etapas P1–P7 | Por verificar | Cada etapa registra estados, tiempos y errores en la base de datos. |
 | Orquestador P1–P7 | Por verificar | Coordina las etapas y aplica las reglas de transición documentadas. |
@@ -447,7 +452,7 @@ Esta sección distingue entre la estructura descrita como objetivo y las capacid
 | Consultas de resultados para el frontend | Pendiente de verificar/implementar | Las rutas devuelven los resultados persistidos mediante respuestas documentadas. |
 | Trazabilidad HU–RF–CP | Pendiente de verificar/implementar | Se conservan las relaciones y existe una ruta para consultarlas. |
 | Validación de relaciones RF–CP | Pendiente de diseño | Existe un mecanismo de validación y la ruta `PATCH` propuesta actualiza `relation_status`. |
-| Eliminación de documentos y generaciones | Por verificar | Se respetan los `409` y se eliminan los datos dependientes y los archivos en Storage. |
+| Eliminación de documentos y generaciones | Parcial | Generaciones: implementado (`409` si está activa; cascada de resultados). Documentos: implementado con la regla de la Fase 2 (solo sin generaciones). Pendiente: soft delete y retención automática. |
 | Recuperación de ejecuciones interrumpidas | Pendiente de diseño | Al iniciar la aplicación, las generaciones `queued` o `running` sin ejecución viva se marcan `failed`. |
 | Métricas y hallazgos de evaluación | Pendiente de definir/implementar | Se definen las fórmulas y se guardan resultados y hallazgos. |
 | Eventos SSE | Reservado | Se implementa el streaming o se mantiene la respuesta `501`. |
@@ -475,7 +480,7 @@ Esta sección distingue entre la estructura descrita como objetivo y las capacid
 
 ## Documentación relacionada
 
-- `docs/database.md`: descripción del modelo de datos, las entidades, sus relaciones y las decisiones pendientes.
+- [`docs/prompts_fases/Fase 1/database.md`](docs/prompts_fases/Fase%201/database.md): descripción del modelo de datos, las entidades, sus relaciones y las decisiones pendientes.
 - `docs/openapi.yaml`: contrato OpenAPI exportado o mantenido para la API, si se utiliza una especificación versionada.
 - `docs/pipeline-orchestration.md`: comportamiento del orquestador y las etapas P1–P7.
 - `supabase/schema.sql`: definición SQL del esquema desplegable. Debe mantenerse sincronizada con la base de datos real.
