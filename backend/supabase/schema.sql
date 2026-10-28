@@ -205,14 +205,39 @@ create table if not exists public.metric_findings (
 -- -----------------------------------------------------------------------------
 -- 6. Índices
 -- -----------------------------------------------------------------------------
+-- Criterio:
+--  * Los UNIQUE y PRIMARY KEY ya crean un índice B-tree. Ese índice sirve para
+--    filtrar por su primera columna sola (prefijo izquierdo), por lo que NO se
+--    crea un índice simple sobre generation_id donde ya existe un UNIQUE que
+--    empieza por esa columna.
+--  * PostgreSQL NO indexa automáticamente las columnas de una FOREIGN KEY. Se
+--    indexa el "otro lado" de las tablas puente para consultas inversas de
+--    trazabilidad y para que los borrados en cascada no recorran la tabla.
+
+-- Limpieza de índices redundantes (si el esquema ya estaba desplegado).
+-- generation_stages  -> cubierto por generation_stages_generation_key_uq (generation_id, stage_key)
+-- user_stories       -> cubierto por user_stories_generation_code_uq (generation_id, code)
+-- functional_requirements -> cubierto por functional_requirements_generation_code_uq
+-- test_cases         -> cubierto por test_cases_generation_code_uq
+drop index if exists public.generation_stages_generation_id_idx;
+drop index if exists public.user_stories_generation_id_idx;
+drop index if exists public.functional_requirements_generation_id_idx;
+drop index if exists public.test_cases_generation_id_idx;
+
+-- Índices necesarios (columnas sin ningún UNIQUE/PK que empiece por ellas).
 create index if not exists generations_document_id_idx         on public.generations (document_id);
 create index if not exists generations_status_idx              on public.generations (status);
-create index if not exists generation_stages_generation_id_idx on public.generation_stages (generation_id);
-create index if not exists user_stories_generation_id_idx      on public.user_stories (generation_id);
-create index if not exists functional_requirements_generation_id_idx on public.functional_requirements (generation_id);
-create index if not exists test_cases_generation_id_idx        on public.test_cases (generation_id);
 create index if not exists generation_metrics_generation_id_idx on public.generation_metrics (generation_id);
 create index if not exists metric_findings_generation_metric_id_idx on public.metric_findings (generation_metric_id);
+
+-- Tablas puente: la PK cubre un sentido; estos cubren el sentido inverso y los
+-- borrados en cascada desde functional_requirements / test_cases.
+create index if not exists user_story_requirements_req_idx
+    on public.user_story_requirements (generation_id, requirement_id);
+create index if not exists cluster_requirements_req_idx
+    on public.cluster_requirements (generation_id, requirement_id);
+create index if not exists requirement_test_cases_tc_idx
+    on public.requirement_test_cases (generation_id, test_case_id);
 
 -- -----------------------------------------------------------------------------
 -- Seguridad: RLS activo sin políticas. Solo service_role (backend) accede.
