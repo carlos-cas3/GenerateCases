@@ -229,6 +229,9 @@ create index if not exists generations_document_id_idx         on public.generat
 create index if not exists generations_status_idx              on public.generations (status);
 create index if not exists generation_metrics_generation_id_idx on public.generation_metrics (generation_id);
 create index if not exists metric_findings_generation_metric_id_idx on public.metric_findings (generation_metric_id);
+-- test_steps: su UNIQUE empieza por test_case_id; sin esto el cascade desde
+-- generations recorre la tabla completa.
+create index if not exists test_steps_generation_id_idx         on public.test_steps (generation_id);
 
 -- Tablas puente: la PK cubre un sentido; estos cubren el sentido inverso y los
 -- borrados en cascada desde functional_requirements / test_cases.
