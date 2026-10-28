@@ -11,18 +11,26 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_service.core.errors import (
     AppError,
+    DocumentInUse,
     DocumentNotFound,
     FeatureNotImplemented,
     GenerationInProgress,
     GenerationNotFound,
+    InvalidDocumentUpload,
+    PayloadTooLarge,
+    UnsupportedMediaType,
 )
 
 logger = logging.getLogger(__name__)
 
 _STATUS_BY_ERROR: dict[type[AppError], int] = {
+    InvalidDocumentUpload: 400,
     DocumentNotFound: 404,
+    DocumentInUse: 409,
     GenerationNotFound: 404,
     GenerationInProgress: 409,
+    PayloadTooLarge: 413,
+    UnsupportedMediaType: 415,
     FeatureNotImplemented: 501,
 }
 

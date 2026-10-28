@@ -306,9 +306,9 @@ Las siguientes decisiones no se consideran cerradas en el diseño inicial:
 5. **Versionado de métricas:** definir si los resultados anteriores se conservan cuando se recalcula una métrica con la misma versión de fórmula.
 6. **Configuración de ejecución:** determinar qué parámetros se almacenarán en `config_snapshot`.
 7. **Modelo de precondiciones y datos de prueba:** decidir si el formato JSONB es suficiente o si se necesitan entidades normalizadas.
-8. **Políticas de eliminación:** establecer cómo se eliminan documentos y ejecuciones sin comprometer la integridad de los resultados históricos.
+8. **Políticas de eliminación:** *Cerrada en la Fase 2.* Una generación final se elimina con sus resultados en cascada (`delete_generation_if_final`); una activa responde `409 GENERATION_IN_PROGRESS`. Un documento solo se elimina si **no tiene ninguna generación** (activa o finalizada); si no, `409 DOCUMENT_IN_USE` con los ids. Es coherente con la FK `on delete restrict` y con que `document_name` se obtiene por JOIN. Queda para una fase futura un soft delete (`documents.deleted_at`) que permita retirar documentos conservando el historial, y la retención automática.
 9. **Concurrencia de ejecuciones:** definir cuántas generaciones pueden estar activas a la vez y cómo se garantiza de forma persistente.
-10. **Ejecuciones interrumpidas:** definir cómo se detectan y se marcan como `failed` las generaciones que quedaron en `queued` o `running` tras un reinicio.
+10. **Ejecuciones interrumpidas:** *Resuelta en la Fase 1.5.* Al arrancar, `recover_interrupted_generations` (`services/pipeline_runs.py`) marca `failed` las generaciones `queued`/`running` y su etapa `running` (supone un único proceso).
 11. **P7 sin implementar:** mientras no exista, la etapa se registra como `skipped` y no se persisten métricas.
 12. **Embeddings para métricas:** definir cómo obtiene P7 los embeddings cuando P3 fue omitida (ver también la decisión 4).
 

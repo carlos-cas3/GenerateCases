@@ -53,6 +53,16 @@ class GenerationsRepository(Protocol):
         """Lista por `created_at` descendente y devuelve también el total exacto."""
         ...
 
+    async def ids_by_document(
+        self,
+        document_id: UUID,
+        *,
+        statuses: Collection[GenerationStatus] | None,
+        limit: int,
+    ) -> tuple[list[UUID], int]:
+        """Ids de generaciones del documento (filtradas por estado si se indica) y total."""
+        ...
+
     async def update_generation_status(
         self,
         generation_id: UUID,
@@ -178,6 +188,26 @@ class SupabaseGenerationsRepository:
             count_response = await self._run(lambda: _filtered("id", head=True).execute())
             return [], count_response.count or 0
         return [_to_record(row) for row in response.data or []], response.count or 0
+
+    async def ids_by_document(
+        self,
+        document_id: UUID,
+        *,
+        statuses: Collection[GenerationStatus] | None,
+        limit: int,
+    ) -> tuple[list[UUID], int]:
+        def _query() -> Any:
+            query = (
+                self._client.table("generations")
+                .select("id", count=CountMethod.exact)
+                .eq("document_id", str(document_id))
+            )
+            if statuses is not None:
+                query = query.in_("status", [value.value for value in statuses])
+            return query.order("created_at", desc=True).limit(limit).execute()
+
+        response = await self._run(_query)
+        return [UUID(row["id"]) for row in response.data or []], response.count or 0
 
     async def update_generation_status(
         self,

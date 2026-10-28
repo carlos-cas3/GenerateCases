@@ -10,7 +10,7 @@ from ai_service.schemas.generations import GenerationStatus, StageKey, StageStat
 
 
 class DocumentRecord(BaseModel):
-    """Fila de `documents` (sin `storage_path`, que la Fase 1 no necesita)."""
+    """Fila de `documents`. `storage_path` es interno: nunca se expone en HTTP."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -18,6 +18,7 @@ class DocumentRecord(BaseModel):
     filename: str
     file_type: str
     size_bytes: int
+    storage_path: str
     checksum: str
     uploaded_at: datetime
 
