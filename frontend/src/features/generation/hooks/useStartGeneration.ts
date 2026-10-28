@@ -4,11 +4,15 @@ import { generationService } from "../services/generationService";
 import type { StartGenerationInput } from "../services/generationService";
 import type { Generation } from "../types";
 
-/** Mensaje para el usuario según el error devuelto al crear la generación. */
+/** Mensaje para el usuario según el error devuelto al subir el documento o crear la generación. */
 function startErrorMessage(error: unknown): string {
     if (isApiError(error)) {
+        if (error.code === "PAYLOAD_TOO_LARGE") return "El archivo supera el límite de 20 MB.";
+        if (error.code === "UNSUPPORTED_MEDIA_TYPE") {
+            return "Tipo de archivo no soportado. Usa un archivo TXT, PDF o DOCX.";
+        }
         if (error.code === "DOCUMENT_NOT_FOUND") {
-            return "El documento de prueba no existe en la base de datos. Aplica supabase/seed.sql.";
+            return "El documento subido ya no existe. Vuelve a seleccionarlo e inténtalo de nuevo.";
         }
         if (error.code === "VALIDATION_ERROR") return "La solicitud no es válida.";
         if (error.code === "NETWORK_ERROR") return "No se pudo conectar con el servidor.";

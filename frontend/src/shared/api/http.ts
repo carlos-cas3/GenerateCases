@@ -46,22 +46,11 @@ async function readJson(response: Response): Promise<unknown> {
     }
 }
 
-/** Petición JSON a la API. Lanza `ApiError`; un `AbortError` se relanza sin envolver. */
-export async function request<T>(
-    path: string,
-    { method = "GET", body, signal }: RequestOptions = {},
-): Promise<T> {
+/** Ejecuta el `fetch` y traduce la respuesta. Común a `request` y `uploadFormData`. */
+async function send<T>(path: string, init: RequestInit): Promise<T> {
     let response: Response;
     try {
-        response = await fetch(`${API_BASE_URL}${API_PREFIX}${path}`, {
-            method,
-            signal,
-            headers: {
-                Accept: "application/json",
-                ...(body !== undefined && { "Content-Type": "application/json" }),
-            },
-            body: body !== undefined ? JSON.stringify(body) : undefined,
-        });
+        response = await fetch(`${API_BASE_URL}${API_PREFIX}${path}`, init);
     } catch (error) {
         if (isAbortError(error)) throw error;
         throw new ApiError(0, "NETWORK_ERROR", "No se pudo conectar con el servidor.");
@@ -79,4 +68,37 @@ export async function request<T>(
         );
     }
     return payload as T;
+}
+
+/** Petición JSON a la API. Lanza `ApiError`; un `AbortError` se relanza sin envolver. */
+export async function request<T>(
+    path: string,
+    { method = "GET", body, signal }: RequestOptions = {},
+): Promise<T> {
+    return send<T>(path, {
+        method,
+        signal,
+        headers: {
+            Accept: "application/json",
+            ...(body !== undefined && { "Content-Type": "application/json" }),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+}
+
+/**
+ * `POST` multipart a la API. Sin `Content-Type`: el navegador lo fija con su `boundary`.
+ * Mismos errores que `request`; aquí no hay reintentos, el llamador muestra el error.
+ */
+export async function uploadFormData<T>(
+    path: string,
+    formData: FormData,
+    { signal }: { signal?: AbortSignal } = {},
+): Promise<T> {
+    return send<T>(path, {
+        method: "POST",
+        signal,
+        headers: { Accept: "application/json" },
+        body: formData,
+    });
 }
