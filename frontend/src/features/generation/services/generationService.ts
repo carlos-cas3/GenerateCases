@@ -1,7 +1,7 @@
 /**
  * Acceso a datos de la generación de casos de prueba.
- * `startGeneration`, `getGeneration` y `listRecentExecutions` usan el backend real;
- * `getExecutionPipeline` sigue con mocks porque lo consume el detalle de historial (Fase 2).
+ * `startGeneration` (subida + creación), `getGeneration` y `listRecentExecutions` usan el backend real;
+ * `getExecutionPipeline` sigue con mocks porque lo consume el detalle de historial.
  */
 import { request } from "@/shared/api";
 import { delay } from "@/shared/utils/delay";
@@ -12,30 +12,25 @@ import type {
     GenerationDto,
     GenerationListDto,
 } from "./generationDto";
+import { documentService } from "./documentService";
 import { mapGeneration, mapRecentExecutions } from "./generationMappers";
 
-/** Fase 1.5: documento del seed. Sin él no se puede iniciar una generación. */
-export const DEV_DOCUMENT_ID =
-    import.meta.env.VITE_DEV_DOCUMENT_ID?.trim() || undefined;
-
 export interface StartGenerationInput {
-    /** Se valida en el cliente pero todavía NO se envía (no existe `POST /documents`). */
+    /** Se sube con `POST /documents` antes de crear la generación. */
     file: File;
     semanticGrouping: boolean;
 }
 
 export const generationService = {
     /**
-     * `POST /generations` con el documento del seed (`VITE_DEV_DOCUMENT_ID`).
-     * `method_type` no se envía: aplica el valor por defecto del servidor.
+     * Sube el archivo (`POST /documents`) y crea la generación sobre él (`POST /generations`).
+     * Si la creación falla tras la subida, el documento queda registrado y es reutilizable
+     * (no hay rollback). `method_type` no se envía: aplica el valor por defecto del servidor.
      */
     async startGeneration(input: StartGenerationInput): Promise<Generation> {
-        // TODO Fase 2: POST /documents con `input.file` y usar el id devuelto.
-        if (!DEV_DOCUMENT_ID) {
-            throw new Error("VITE_DEV_DOCUMENT_ID no está configurado.");
-        }
+        const documentId = await documentService.uploadDocument(input.file);
         const body: CreateGenerationRequestDto = {
-            document_id: DEV_DOCUMENT_ID,
+            document_id: documentId,
             configuration: {
                 semantic_clustering_enabled: input.semanticGrouping,
             },

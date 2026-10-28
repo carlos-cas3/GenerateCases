@@ -11,7 +11,6 @@ import { useExecutionProgress } from '../hooks/useExecutionProgress';
 import { useRecentExecutions } from '../hooks/useRecentExecutions';
 import { useStartGeneration } from '../hooks/useStartGeneration';
 import { isActiveStatus } from '../services/generationMappers';
-import { DEV_DOCUMENT_ID } from '../services/generationService';
 import type { Generation } from '../types';
 
 /**
@@ -48,10 +47,6 @@ const RECENT_EXECUTIONS_LIMIT = 3;
 /** La primera etapa arranca expandida (las fallidas se expanden siempre). */
 const DEFAULT_EXPANDED_IDS = ['p1'];
 
-const DEV_DOCUMENT_NOTICE = DEV_DOCUMENT_ID
-  ? 'Fase de pruebas: se usa un documento de ejemplo; el archivo seleccionado no se envía.'
-  : 'Falta configurar VITE_DEV_DOCUMENT_ID en el .env del frontend: no se puede iniciar una generación.';
-
 export function GenerationPage() {
   const [file, setFile] = useState<File | null>(null);
   const [semanticGrouping, setSemanticGrouping] = useState(true);
@@ -83,7 +78,6 @@ export function GenerationPage() {
 
   const handleSubmit = async () => {
     if (!file) return;
-    // TODO Fase 2: POST /documents. Hoy el archivo no se envía (se usa VITE_DEV_DOCUMENT_ID).
     await generation.start({ file, semanticGrouping });
   };
 
@@ -126,9 +120,8 @@ export function GenerationPage() {
           onSubmit={handleSubmit}
           isSubmitting={generation.isCreating}
           // Una sola generación seguida a la vez (regla de interfaz, no garantía del backend).
-          submitDisabled={!DEV_DOCUMENT_ID || isTrackingActive || (!!active.generationId && progress.isLoading)}
+          submitDisabled={isTrackingActive || (!!active.generationId && progress.isLoading)}
           errorMessage={generation.error}
-          notice={DEV_DOCUMENT_NOTICE}
         />
         <ExecutionProgressCard
           // Cada generación empieza con su propio estado de expansión.
