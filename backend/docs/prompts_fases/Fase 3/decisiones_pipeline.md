@@ -2,6 +2,8 @@
 
 Documento de respuesta a las secciones 2, 3 y 4 de la revisión del diseño (`pipeline_design.md`). Recoge las decisiones tomadas, las recomendaciones propuestas y los cambios que implican en `schema.sql`, `openapi.yaml` y el código.
 
+> **Actualización (cierre documental, 2026-11-04):** las claves de `test_data` (D-26), la lista de métricas de P7 (D-37), D-18 y D-36 quedaron cerradas. Ver `cierre_documental.md`. Donde este documento diga otra cosa, prevalece el cierre.
+
 **Convenciones**
 - **Decidido**: confirmado por el responsable del proyecto.
 - **Recomendado**: propuesta pendiente de confirmación.
@@ -53,7 +55,7 @@ P7 **siempre se ejecuta**: calcula las métricas, las guarda en `generation_metr
 - Un fallo de P7 **no invalida** la generación: queda `completed` con un aviso, porque los casos de prueba ya existen y las métricas son informativas.
 - Si no hay RF (ver D-29), P7 queda `skipped`, porque no hay nada que medir.
 
-**Pendiente**: definir qué métricas calcula P7 además de `requirement_coverage`. Sugerencia inicial (a confirmar):
+**Resuelto en D-37** (ver `cierre_documental.md`): `requirement_coverage` cuenta solo vínculos `validated`, se añade `proposed_requirement_coverage` y `unassigned_ratio` solo aplica con clustering. Sugerencia inicial original:
 - `requirement_coverage`: proporción de RF con al menos un CP.
 - `story_coverage`: proporción de HU con al menos un RF.
 - `cases_per_requirement`: promedio de CP por RF.
@@ -71,7 +73,9 @@ Un lector vería una decisión pendiente que apunta a una decisión cerrada de o
 
 **D-26 — Estructura de `test_data` (decidido: JSON)**
 
-Propuesta de claves fijas (a confirmar):
+> **Cerrado:** `test_data` lleva solo `inputs` y `notes`. `preconditions` y `expected_result` quedan como campos de primer nivel del caso. La propuesta original de 4 claves queda abajo como referencia histórica.
+
+Propuesta original de claves fijas (reemplazada):
 
 ```json
 {
@@ -198,10 +202,14 @@ Se actualiza P5 y la nota de R6.
 ```sql
 CREATE TABLE IF NOT EXISTS unassigned_requirements (
   generation_id  uuid NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
-  requirement_id uuid NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
-  PRIMARY KEY (generation_id, requirement_id)
+  requirement_id uuid NOT NULL,
+  PRIMARY KEY (generation_id, requirement_id),
+  FOREIGN KEY (generation_id, requirement_id)
+    REFERENCES functional_requirements (generation_id, id) ON DELETE CASCADE
 );
 ```
+
+> Corregido (T-03): la tabla de RF es `functional_requirements` y la FK es compuesta `(generation_id, id)`, como en `schema.sql`. No existe una tabla `requirements`.
 
 - `ClusterList` del openapi gana `unassigned_requirement_ids`, para que el frontend no tenga que inferirlos por ausencia.
 - `INSUFFICIENT_REQUIREMENTS` **deja de fallar la generación**: con pocos RF, todos quedan sin agrupar y se emite un aviso.
@@ -258,8 +266,8 @@ Son ambigüedades pequeñas que, si no se fijan por escrito, cada persona interp
 
 ## 6. Pendientes por decidir
 
-1. Confirmar las claves de `test_data` (`preconditions`, `inputs`, `expected_results`, `notes`).
-2. Definir la lista final de métricas de P7.
+1. ~~Confirmar las claves de `test_data`~~ → cerrado: solo `inputs` y `notes` (D-26).
+2. ~~Definir la lista final de métricas de P7~~ → cerrado en D-37.
 3. Confirmar las recomendaciones marcadas como "Recomendado" (G1, G2, G4, 2.4, 2.5 y puntos menores).
 
 ## 7. Orden de implementación sugerido

@@ -1,8 +1,8 @@
 # Diseño técnico del pipeline
 
 > **Estado:** borrador. Contiene únicamente la **Sección 1: modelos y contratos de entrada/salida**.\
-> **Alcance:** etapas P1–P7. P7 (evaluación) siempre se ejecuta cuando hay requisitos y no es bloqueante (D-33); su contrato detallado está pendiente.\
-> **Revisión:** incorpora las decisiones D-26 a D-35 de `decisiones_pipeline.md`.
+> **Alcance:** etapas P1–P7. P7 (evaluación) se ejecuta cuando hay casos de prueba y no es bloqueante (D-33); sus métricas v1 están en D-37 y su contrato en código está pendiente.\
+> **Revisión:** incorpora las decisiones D-26 a D-35 de `decisiones_pipeline.md` y el cierre documental (D-18, D-26, D-36, D-37 y las tareas T-01 a T-04) de `cierre_documental.md`.
 
 ---
 
@@ -20,7 +20,7 @@ Convenciones de nomenclatura:
 
 - Identificadores de código en inglés (`UserStory`, `FunctionalRequirement`, `TestCase`). Los términos de negocio HU, RF y CP se usan en la prosa.
 - Códigos legibles por generación: `HU-001`, `RF-001`, `CP-001`.
-- Todos los modelos son **inmutables** (`@dataclass(frozen=True)` o equivalente). Cada etapa devuelve objetos nuevos y no modifica los recibidos.
+- Todos los modelos son **inmutables**. Los contratos P1–P6 se implementan como modelos Pydantic v2 con `frozen=True` y `extra="forbid"` (`ai_service/pipeline/contracts/`). Cada etapa devuelve objetos nuevos y no modifica los recibidos.
 
 ---
 
@@ -32,9 +32,9 @@ Antes de definir los modelos conviene fijar lo que ya está decidido fuera de es
 
 | # | Restricción | Fuente | Impacto en el diseño |
 |---|---|---|---|
-| R1 | Existen siempre siete etapas (`p1`…`p7`) por generación, creadas en `pending`. | `create_generation`, `generation_stages` | El orquestador resuelve el estado de las siete. P7 se ejecuta siempre que haya RF y **no es bloqueante**: si falla, queda `failed` y la generación termina `completed` (D-33). |
+| R1 | Existen siempre siete etapas (`p1`…`p7`) por generación, creadas en `pending`. | `create_generation`, `generation_stages` | El orquestador resuelve el estado de las siete. P7 se ejecuta siempre que P6 se haya ejecutado (es `skipped` en los casos D-29 y D-36) y **no es bloqueante**: si falla, queda `failed` y la generación termina `completed` (D-33). |
 | R2 | Con `semantic_clustering_enabled=false`, P3 y P4 quedan `skipped`. | `openapi.yaml` | **P5 no puede exigir clustering**: su entrada de clusters es opcional. |
-| R3 | Si una etapa P1–P6 falla, las siguientes quedan `pending` y la generación termina `failed`. Si P2 no extrae RF, P2 queda `completed` con aviso y P3–P7 `skipped` (D-29). | `openapi.yaml` | Política *fail-fast* a nivel de etapa. Los fallos parciales dentro de una etapa se deciden en cada contrato. |
+| R3 | Si una etapa P1–P6 falla, las siguientes quedan `pending` y la generación termina `failed`. Si P2 no extrae RF, P2 queda `completed` con aviso y P3–P7 `skipped` (D-29). Si con clustering ningún RF queda en un cluster, P5 queda `completed` con aviso y 0 unidades, y P6–P7 `skipped` (D-36). | `openapi.yaml` | Política *fail-fast* a nivel de etapa. Los fallos parciales dentro de una etapa se deciden en cada contrato. |
 | R4 | Cada artefacto pertenece a una `generation_id` (FK compuestas `(generation_id, id)`). | `schema.sql` | Todos los contratos transportan `generation_id`. No hay reutilización entre generaciones. |
 | R5 | `id` es `uuid`; `code` es texto único por generación en HU, RF y CP. | `schema.sql` | Se necesita doble identidad (ver 1.2). |
 | R6 | Relaciones M:N: HU–RF (`user_story_requirements`), RF–CP (`requirement_test_cases`) y RF–cluster (`cluster_requirements`; la PK permite que un RF esté en varios clusters). | `schema.sql` | Los modelos usan listas de referencias, nunca campos escalares. Si un RF está en varios clusters, P5 lo toma como objetivo solo en uno (D-31). |
@@ -251,17 +251,17 @@ Se persiste en `test_cases`, `test_steps` y `requirement_test_cases`.
 | `code` | str | sí | `code` | `CP-001`… asignado por el pipeline. |
 | `title` | str | sí | `title` | |
 | `objective` | str \| None | no | `objective` | |
-| `preconditions` | tuple[str] | sí | `preconditions` (JSONB) | Puede ser vacía. |
-| `test_data` | `TestData` \| None | no | `test_data` (JSONB) | Claves fijas: `preconditions`, `inputs`, `expected_results`, `notes` (D-26). |
+| `preconditions` | tuple[str] | sí | `preconditions` (JSONB) | Puede ser vacía. Única ubicación de las precondiciones del caso (D-26). |
+| `test_data` | `TestData` \| None | no | `test_data` (JSONB) | Solo `inputs` y `notes` (D-26). |
 | `steps` | tuple[`TestStep`] | sí | `test_steps` | **Mínimo 1.** |
-| `expected_result` | str | sí\* | `expected_result` | Resultado global. Nullable en BD; se exige en el contrato **[Propuesta]**. |
+| `expected_result` | str | sí\* | `expected_result` | Resultado global y única ubicación del resultado esperado del caso (D-26). Nullable en BD; se exige en el contrato **[Propuesta]**. |
 | `requirement_links` | tuple[`RequirementTestCaseLink`] | sí | `requirement_test_cases` | **Mínimo 1.** |
 
-`TestData` (D-26): `preconditions: tuple[str]`, `inputs: dict[str, Any]`, `expected_results: tuple[str]`, `notes: str | None`. Todas opcionales; una clave desconocida es `LLM_INVALID_OUTPUT`.
+`TestData` (D-26): `inputs: dict[str, Any]`, `notes: str | None`. Ambas opcionales; cualquier otra clave (incluidas `preconditions` y `expected_results`) es `LLM_INVALID_OUTPUT`. Las precondiciones y el resultado esperado son campos de primer nivel del caso, no de `test_data`.
 
 `TestStep`: `step_number: int` (≥ 1, consecutivo desde 1), `action: str`, `expected_result: str | None`.
 
-`RequirementTestCaseLink`: `requirement_code: str`, `status: RelationStatus` (**siempre `pending`** al salir de P6), `validation_method: str | None` (`None` al salir de P6), `validation_notes: str | None`.
+`RequirementTestCaseLink`: `requirement_code: str`, `status: RelationStatus` (**siempre `pending`** al salir de P6), `validation_method: str | None` (`None` al salir de P6), `validation_notes: str | None` (`None` al salir de P6: el soporte CP–RF está diferido, D-18).
 
 **Invariantes**
 
@@ -284,7 +284,7 @@ El `GenerationContext` es el contenedor de una generación y está formado por *
 | `output_spec` | `TestCaseOutputSpec` | Estructura esperada del caso de prueba (común a todas las unidades). |
 | `instructions_version` | str | Versión del prompt/instrucciones de generación. |
 | `strategy` | str | `by_cluster` o `by_user_story`; una unidad puede subdividirse por límite de tokens. **[Resuelta D-12]** |
-| `units` | tuple[`ContextUnit`] | Mínimo 1. |
+| `units` | tuple[`ContextUnit`] | Puede ser vacía solo en el caso D-36 (clustering sin ningún RF asignado). En cualquier otro caso, mínimo 1. |
 
 `ContextUnit`
 
@@ -293,7 +293,8 @@ El `GenerationContext` es el contenedor de una generación y está formado por *
 | `unit_id` | str | Identificador estable dentro de la generación, por ejemplo `U-001`. |
 | `label` | str | Nombre del clúster, HU o subunidad. |
 | `cluster_label` | int \| None | `None` si la unidad no proviene de un clúster. En subunidades se conserva el clúster de origen. |
-| `requirements` | tuple[`ContextRequirement`] | `code`, `description`. |
+| `requirements` | tuple[`ContextRequirement`] | RF **objetivo** de la unidad (`code`, `description`). Mínimo 1. |
+| `context_requirements` | tuple[`ContextRequirement`] | RF de **contexto**: pertenecen al cluster de la unidad pero son objetivo en otro (D-31). No pueden enlazarse desde los casos generados. Puede ser vacía. |
 | `user_stories` | tuple[`ContextUserStory`] | Referencias y contenido relevante de las HU de origen, incluidos fragmentos enriquecidos que aporten contexto a la generación. Cada HU aparece una sola vez por unidad. |
 | `requirement_to_stories` | mapping[str, tuple[str]] | Relaciones RF→HU por código, sin repetir texto. |
 | `prerequisites` | tuple[`ContextRequirement`] | **Solo contexto:** RF prerrequisito que no pertenecen a la unidad. No pueden enlazarse desde los casos generados. Opcional. **[Pendiente D-17]** |
@@ -310,14 +311,14 @@ El `GenerationContext` es el contenedor de una generación y está formado por *
 
 #### 1.4.2 `TestCaseOutputSpec`
 
-Especificación de la estructura que el LLM debe devolver y que P6 valida.
+Especificación de la estructura que el LLM debe devolver y que P6 valida. En código tiene dos campos: `version` (versión de la especificación) y `json_schema` (esquema JSON que se entrega al LLM). El esquema se genera desde `P6LlmResponse` con `default_output_spec()`, de modo que la especificación y la validación no pueden divergir. Las reglas del esquema son:
 
 | Campo del caso | Obligatorio | Regla |
 |---|---|---|
 | `title` | sí | No vacío. |
 | `objective` | no | |
 | `preconditions` | no | Lista de cadenas; vacía por defecto. |
-| `test_data` | no | Objeto `TestData` (D-26); claves desconocidas no se admiten. |
+| `test_data` | no | Objeto `TestData` con solo `inputs` y `notes` (D-26); claves desconocidas no se admiten. |
 | `steps` | sí | ≥ 1 paso, cada uno con `action` no vacío. |
 | `expected_result` | sí | No vacío. |
 | `requirement_codes` | sí | ≥ 1; todos presentes en la unidad. |
@@ -330,6 +331,15 @@ Campos como prioridad, tipo (positivo/negativo/límite) o etiquetas **no existen
 |---|---|---|
 | `RequirementDraft` | P2 | `description`, `user_story_codes`, atributos descriptivos opcionales, `evidence` y `unspecified_information`. `source_text` puede ser `None` cuando no pueda delimitarse un fragmento literal. |
 | `TestCaseDraft` | P6 | Los campos de `TestCaseOutputSpec` (`requirement_codes` en lugar de vínculos). |
+
+Sobres de la respuesta cruda del LLM (se validan con `model_validate_json()` antes de convertirse en contratos de salida):
+
+| Sobre | Etapa | Campos | Validación con contexto |
+|---|---|---|---|
+| `P2LlmResponse` | P2 | `classifications` (mínimo 1), `requirements: tuple[RequirementDraft]` (puede ser vacía, D-29) | Los `user_story_codes` deben pertenecer a las HU enviadas en la llamada. |
+| `P6LlmResponse` | P6 | `test_cases: tuple[TestCaseDraft]` (mínimo 1) | Los `requirement_codes` deben ser RF objetivo de la unidad. Una respuesta sin casos es `LLM_INVALID_OUTPUT` y se reintenta. |
+
+`P6UnitOutput` (resultado aceptado de una unidad de P6): `unit_id`, `test_cases: tuple[TestCase]`. Expone `to_rpc_payload()` para `persist_p6_unit`; `P6Output.test_cases` se deriva de las unidades.
 
 #### 1.4.4 Metadatos de ejecución y errores
 
@@ -347,11 +357,10 @@ En código, la etapa devuelve un `StageResult` (`warnings`, `llm_runs`, `runtime
 
 `LlmRunInfo`: `provider`, `model`, `prompt_version`, `input_tokens`, `output_tokens`, `attempts`, `latency_ms`, `unit_id | None`.
 
-`StageError` (se refleja en `generation_stages.error_code` y `generation_stages.error_message`, D-28). Cualquier otra excepción se registra con `error_code=INTERNAL_ERROR` y un mensaje genérico:
+`StageError` (se refleja en `generation_stages.error_code` y `generation_stages.error_message`, D-28). Cualquier otra excepción se registra con `error_code=INTERNAL_ERROR` y un mensaje genérico. `StageError` **no** lleva la etapa: la aporta el orquestador, que sabe qué etapa está ejecutando y escribe el error en la fila de `generation_stages` correspondiente.
 
 | Campo | Tipo | Notas |
 |---|---|---|
-| `stage_key` | `StageKey` | |
 | `code` | str | Ver tabla de errores por etapa. |
 | `message` | str | Apto para persistir y mostrar. Sin datos sensibles ni texto completo del documento. |
 | `retryable` | bool | |
@@ -592,7 +601,7 @@ En v1, la clasificación se realiza mediante LLM. El contrato `StoryClassificati
 
 **Errores:** `EMBEDDING_REQUIREMENT_MISMATCH`, `CLUSTERING_FAILED`.
 
-**Pocos RF (D-32):** `INSUFFICIENT_REQUIREMENTS` **deja de ser un error**: si hay menos RF de los que el algoritmo necesita, todos quedan en `unassigned_requirement_codes` y P4 termina `completed` con ese aviso. Ver D-36 para lo que ocurre después en P5/P6.
+**Pocos RF (D-32):** `INSUFFICIENT_REQUIREMENTS` **deja de ser un error**: si hay menos RF de los que el algoritmo necesita, todos quedan en `unassigned_requirement_codes` y P4 termina `completed` con ese aviso. Lo que ocurre después en P5–P7 lo fija D-36 (ver P5).
 
 **Persistencia:** al terminar, P4 llama a `persist_p4_clusters` (una transacción): `clusters`, `cluster_requirements` y `unassigned_requirements`.
 
@@ -631,15 +640,24 @@ En v1, la clasificación se realiza mediante LLM. El contrato `StoryClassificati
 
 **Invariantes:** completitud de RF en unidades; sin texto duplicado; referencias por código resolubles.
 
-**Errores:** `EMPTY_CONTEXT` (solo si hay RF objetivo y aun así no se puede construir ninguna unidad; con cero RF P5 está `skipped`, D-29), `UNRESOLVED_REFERENCE`, `TOKEN_LIMIT_UNSATISFIABLE`.
+**Errores:** `EMPTY_CONTEXT` (solo si hay RF objetivo y aun así no se puede construir ninguna unidad; no aplica con cero RF, D-29, ni con cero RF asignados, D-36), `UNRESOLVED_REFERENCE`, `TOKEN_LIMIT_UNSATISFIABLE`.
 
-**Pendiente D-36:** con clustering, si **ningún** RF quedó asignado a un cluster (p. ej. pocos RF), no hay RF objetivo: P5 no tiene unidades y la generación fallaría con `EMPTY_CONTEXT`. Ver 1.9.
+**Ningún RF asignado a un cluster (D-36, resuelta con la opción a):** con clustering, si P4 deja todos los RF en `unassigned_requirement_codes`, no hay RF objetivo. **No es un fallo:**
+
+| Etapa | Estado |
+|---|---|
+| P1–P4 | `completed` (P4 con aviso `INSUFFICIENT_REQUIREMENTS` si corresponde) |
+| P5 | `completed` con aviso `INSUFFICIENT_CONTEXT` y `GenerationContext.units` vacía |
+| P6 – P7 | `skipped` |
+| Generación | `completed` |
+
+Los RF siguen guardados en `unassigned_requirements` y visibles en la API (D-32). El contrato de P5 debe admitir cero unidades en este caso (cambio de contratos posterior, ver `cierre_documental.md`).
 
 #### P6. Generación de casos de prueba funcionales (LLM)
 
 | | |
 |---|---|
-| **Estado** | Siempre se ejecuta. |
+| **Estado** | Se ejecuta si P5 produjo al menos una unidad; `skipped` con cero RF (D-29) o cero unidades (D-36). |
 | **Puerto** | `TestCaseGenerator`. |
 
 **`P6Input`**
@@ -648,7 +666,7 @@ En v1, la clasificación se realiza mediante LLM. El contrato `StoryClassificati
 |---|---|---|
 | `generation_id` | UUID | sí |
 | `context` | `GenerationContext` | sí |
-| `config` | `P6Config` (`prompt_version`, `llm`, `max_retries`, `on_unit_failure`, `link_support_threshold` opcional) | sí |
+| `config` | `P6Config` (`prompt_version`, `llm`, `max_retries`, `on_unit_failure`) | sí |
 
 **`P6Output`**
 
@@ -666,13 +684,12 @@ En v1, la clasificación se realiza mediante LLM. El contrato `StoryClassificati
 3. Pasos consecutivos desde 1; código de CP único.
 4. Una respuesta que no cumple `TestCaseOutputSpec` se reintenta; agotados los reintentos, la unidad se marca como fallida.
 5. Un RF de `prerequisites` (solo contexto) no puede aparecer en `requirement_links`.
-6. *(Opcional)* Cada vínculo recibe un score de soporte entre el texto del caso y la descripción del RF. Si queda por debajo de `link_support_threshold`, se anota en `validation_notes` sin cambiar el estado `pending` (ver 1.6.1).
-
+6. El soporte del vínculo CP–RF está **diferido** (D-18): P6 no calcula ningún score y deja `validation_notes` en `None`.
 7. Los códigos `CP-xxx` se asignan solo a los casos de la respuesta **aceptada** de una unidad: los reintentos no consumen códigos.
 8. Los `requirement_codes` repetidos en un mismo caso se eliminan antes de persistir (la PK de `requirement_test_cases` los rechazaría). `persist_p6_unit` también los elimina.
-9. `test_data` debe cumplir `TestData` (D-26); si no, la respuesta es `LLM_INVALID_OUTPUT` y se reintenta.
+9. `test_data` debe cumplir `TestData` (solo `inputs` y `notes`, D-26); si no, la respuesta es `LLM_INVALID_OUTPUT` y se reintenta.
 
-**Errores:** `LLM_UNAVAILABLE`, `LLM_INVALID_OUTPUT`, `UNIT_GENERATION_FAILED`, `NO_TEST_CASES_GENERATED` (solo cuando hay RF objetivo y no se genera ningún CP; con cero RF P6 está `skipped`, D-29).
+**Errores:** `LLM_UNAVAILABLE`, `LLM_INVALID_OUTPUT`, `UNIT_GENERATION_FAILED`, `NO_TEST_CASES_GENERATED` (solo cuando hay unidades y no se genera ningún CP; con cero RF o cero unidades P6 está `skipped`, D-29 y D-36).
 
 **Ejecución y persistencia incremental (D-15 resuelta):** P6 procesa las unidades secuencialmente en v1. Cada unidad completada persiste sus casos de prueba y vínculos de forma atómica mediante `persist_p6_unit`: se guardan todos los artefactos de esa unidad o ninguno. Si una unidad falla, se reintenta hasta `max_retries`; si el fallo persiste, P6 termina y la generación global queda `failed`. Las unidades completadas antes del fallo y sus resultados persistidos se conservan. Se registra `unit_id`, código de error y mensaje apto para consulta; los detalles internos sensibles quedan en logs. No se implementa reanudación automática en v1. `P6Output.failed_units` describe la unidad fallida si el contrato devuelve un resultado de etapa; el estado terminal de la etapa sigue siendo fallido.
 
@@ -680,11 +697,23 @@ En v1, la clasificación se realiza mediante LLM. El contrato `StoryClassificati
 
 | | |
 |---|---|
-| **Estado** | Siempre se ejecuta cuando hay RF; `skipped` si P2 no extrajo RF (D-29). |
+| **Estado** | Se ejecuta cuando P6 se ejecutó; `skipped` si P2 no extrajo RF (D-29) o si P5 no produjo unidades (D-36). |
 | **Bloqueante** | **No** (D-33): si falla, queda `failed` con su `error_code` y la generación termina `completed`. |
 | **Responsabilidad** | Calcular métricas y guardarlas en `generation_metrics` (y sus hallazgos en `metric_findings`). Es la única etapa que escribe ahí. |
 
-Métricas iniciales sugeridas (**pendientes de confirmar**): `requirement_coverage` (RF con al menos un CP), `story_coverage` (HU con al menos un RF), `cases_per_requirement` (promedio de CP por RF) y `unassigned_ratio` (RF sin cluster). La versión evolucionada (reglas de rechazo, contención, etc.) queda fuera del alcance. El contrato `P7Input`/`P7Output` se define cuando se cierre la lista de métricas.
+**Métricas v1 (D-37, `formula_version = "v1"`).** Cada métrica es una fila de `generation_metrics` con `metric_name`, `metric_value`, `numerator`, `denominator` y `formula_version`. Todas se calculan sobre la generación actual.
+
+| `metric_name` | Numerador | Denominador | Notas |
+|---|---|---|---|
+| `requirement_coverage` | RF con al menos un vínculo `validated` | Total de RF | Solo `validated` cuenta como cobertura (R7). Recién salida de P6 vale 0, porque todos los vínculos son `pending`. |
+| `proposed_requirement_coverage` | RF con al menos un vínculo `pending` o `validated` | Total de RF | Cobertura propuesta por el LLM. **No** es cobertura (R7); se muestra aparte. Los vínculos `rejected` no cuentan. |
+| `story_coverage` | HU no `invalid` con al menos un RF | HU no `invalid` | |
+| `cases_per_requirement` | Vínculos CP–RF no `rejected` | Total de RF | Promedio de CP por RF. |
+| `unassigned_ratio` | RF en `unassigned_requirements` | Total de RF | **Solo con clustering habilitado.** Sin clustering no se inserta la fila (no aplica; ni 0 ni `null`). |
+
+- Si el denominador es 0, `metric_value` es `null` y `numerator`/`denominator` se guardan igual. Con D-29 y D-36 P7 está `skipped`, así que en la práctica el total de RF nunca es 0.
+- Un cambio en cualquiera de estas fórmulas exige nueva `formula_version`.
+- La versión evolucionada (reglas de rechazo, contención, etc.) queda fuera del alcance. El contrato `P7Input`/`P7Output` en código se escribe en el cambio de contratos posterior.
 
 ---
 
@@ -705,7 +734,7 @@ Métricas iniciales sugeridas (**pendientes de confirmar**): `requirement_covera
 | P2 | Pistas de atomización | Coordinaciones (y, e, comas, "así como") entre verbos u objetos distintos. | Hallazgo `decomposition_candidate` (pista, **no** división automática) | **[Pendiente D-20]** |
 | P5 | Dependencias entre RF | Cadena de RF prerrequisito inyectada en la unidad. | `ContextUnit.prerequisites` | **[Pendiente D-17]** |
 | P6 | Anclaje del caso | `requirement_codes` ⊂ RF de la unidad; los prerrequisitos no se enlazan. | Rechazo del vínculo | **[Propuesta]** |
-| P6 | Soporte del vínculo CP–RF (opcional) | Similitud léxica entre el caso y el RF enlazado. | Nota en `validation_notes`; el estado sigue `pending` | **[Pendiente D-18]** |
+| P6 | Soporte del vínculo CP–RF | Similitud léxica entre el caso y el RF enlazado. | — | **Diferido (D-18).** No forma parte de v1. |
 
 P3 y P4 ya tienen sus invariantes en 1.5 y no necesitan un validador adicional.
 
@@ -779,7 +808,7 @@ La calibración de métricas y umbrales concretos queda pendiente de contar con 
 | P6 | RPC `persist_p6_unit`, una llamada por unidad (D-15). |
 | P7 | Inserción en `generation_metrics` / `metric_findings`. |
 
-Las RPC reciben las referencias por `code` y las traducen a `id` dentro de la generación; un código inexistente aborta toda la llamada.
+Las RPC reciben las referencias por `code` y las traducen a `id` dentro de la generación; un código inexistente aborta toda la llamada. Su comportamiento ante una segunda llamada con el mismo payload (idempotencia) está abierto en T-01, y el manejo de HU duplicadas en `persist_p2_requirements` en T-02 (ver `cierre_documental.md`).
 
 ---
 
@@ -817,7 +846,7 @@ Todo el recorrido se resuelve por `code` dentro de una misma `generation_id`. No
 | **D-15** | Fallo de una unidad de P6 y conservación de resultados previos | Fallar etapa y descartar resultados; continuar con otras unidades; persistencia incremental | **Resuelta.** Procesar secuencialmente en v1; reintentar la unidad según `max_retries`; si persiste, detener P6 y marcar la generación `failed`. Conservar las unidades ya completadas. Persistencia atómica por unidad (todo o nada), registrar causa del fallo y no reanudar automáticamente en v1. |
 | **D-16** | Valores admitidos de `method_type` | Texto libre actual | Definir catálogo (`llm_pipeline` ya aparece en los ejemplos). |
 | **D-17** | Dependencias entre RF (`depends_on`): ¿se incluyen y quién las obtiene? | Omitir en v1; LLM en P2; reglas; LLM en P5 | Omitir en v1 y evaluarlas cuando se mida la calidad de P6. |
-| **D-18** | Conjunto etiquetado y umbrales (`grounding`, cobertura, soporte CP–RF) | Definir tamaño, quién etiqueta y dónde se guarda | Definir un conjunto de evaluación cuando se concrete el criterio; no fijar umbrales hasta disponer de datos etiquetados. El soporte CP–RF solo se añade si se demuestra útil. |
+| **D-18** | Conjunto etiquetado y umbrales (`grounding`, cobertura, soporte CP–RF) | Definir tamaño, quién etiqueta y dónde se guarda | **Soporte CP–RF: diferido.** Se retira `link_support_threshold` de `P6Config` y P6 no anota `validation_notes` en v1. Si se retoma: umbral configurable, nota informativa no bloqueante y `formula_version` registrada, con una propuesta de cálculo revisada antes de implementarla. Para `grounding` y cobertura se mantiene: no fijar umbrales hasta disponer de datos etiquetados. |
 | **D-19** | Tratamiento de RF con evidencia insuficiente | Regenerar automáticamente; conservar marcado; excluir; pedir aclaración | No asumir regeneración automática ni exclusión. Conservar la limitación y la evidencia disponible; los criterios de revisión/reintento se definirán tras validar el comportamiento del LLM. |
 | **D-20** | Reglas de atomicidad (pistas de descomposición) | Empezar ahora; posponer | Posponer hasta tener un conjunto etiquetado de "atómico / no atómico". |
 | **D-21** | Tratamiento de criterios de aceptación y secciones enriquecidas | Ignorarlos; conservarlos y usarlos en P2; usarlos solo para evaluación | Conservarlos y asociarlos a la HU en P1; P2 los utiliza como evidencia para clasificar y extraer RF. No se añaden columnas persistentes en v1 sin justificar una migración. |
@@ -825,17 +854,18 @@ Todo el recorrido se resuelve por `code` dentro de una misma `generation_id`. No
 | **D-23** | Reglas para historias en inglés | Definirlas ahora; posponer | Posponer. En v1 los datasets en inglés se traducen y se estructuran en español antes de subirlos. Al añadirlas, los patrones irán en configuración por idioma. |
 | **D-24** | ¿Se procesan las HU al subir el documento (`POST /documents`) o en el pipeline? | Todo en la subida; todo en P1; separado | **Separado.** La subida acepta el **archivo** (tipo, tamaño, legible, no vacío) y no crea HU. El pipeline asume un archivo ya aceptado, pero **no** que tenga historias ni que sean válidas: eso lo valida P1 en cada generación. Opcional más adelante: vista previa que reutilice la lógica de P1 sin persistir (`x-status: proposed`). |
 | **D-25** | Reglas específicas de PDF y DOCX (encabezados, pies de página, viñetas, numeración, estilos) | Definirlas ahora; posponer | Posponer. En v1 se extrae su texto y se trata como un TXT. |
-| **D-26** | Estructura de `test_data` | Libre; claves fijas | **Resuelta (JSON).** Claves `preconditions`, `inputs`, `expected_results`, `notes`; esquema `TestData` en el openapi. Claves pendientes de confirmar: `preconditions` y `expected_results` se solapan con `test_cases.preconditions` y `expected_result`. |
+| **D-26** | Estructura de `test_data` | Libre; claves fijas | **Resuelta.** JSON con solo `inputs` (objeto clave-valor) y `notes` (texto opcional). `preconditions` y `expected_result` son campos de primer nivel del caso (`test_cases.preconditions`, `test_cases.expected_result`) y no se repiten en `test_data`. El esquema `TestData` del openapi y el contrato se ajustan en el cambio de contratos posterior. |
 | **D-27** | Persistencia de la clasificación de P2 | Solo memoria; columnas en `user_stories` | **Resuelta.** `classification` (con `check`), `classification_rationale`, `clarification_items`. Expuestas en `UserStory`. |
 | **D-28** | Código de error por etapa | Solo mensaje; columna `error_code` | **Resuelta.** `generation_stages.error_code`; el orquestador propaga `StageError.code` y `message`. |
 | **D-29** | Cero RF extraídos | Fallar en P5; completar con aviso | **Resuelta.** P2 `completed` con aviso `NO_REQUIREMENTS_EXTRACTED`; P3–P7 `skipped`; generación `completed`. |
 | **D-30** | Momento y atomicidad de la persistencia | Al final; por etapa; por etapa vía RPC | **Resuelta.** Cada etapa guarda al terminar; P2, P4 y P6 mediante RPC transaccionales (ver 1.7). |
 | **D-31** | RF en varios clusters | Duplicar objetivo; elegir uno | **Resuelta.** Objetivo en el cluster de mayor `similarity_to_centroid` (desempate: menor `label`); contexto en los demás. |
 | **D-32** | RF sin cluster | Descartar; unidad `ungrouped`; guardar sin generar CP | **Resuelta.** Se guardan en `unassigned_requirements` y se muestran; por ahora no generan CP. `INSUFFICIENT_REQUIREMENTS` pasa a aviso. |
-| **D-33** | P7 | Siempre `skipped`; siempre se ejecuta | **Resuelta.** Siempre se ejecuta (salvo D-29), calcula métricas y no es bloqueante. Modifica R1. |
+| **D-33** | P7 | Siempre `skipped`; siempre se ejecuta | **Resuelta.** Siempre se ejecuta (salvo D-29 y D-36), calcula métricas (D-37) y no es bloqueante. Modifica R1. |
 | **D-34** | `config_snapshot` | Fijo al inicio; fusionar durante la ejecución | **Resuelta.** Fijo al inicio (lo solicitado); lo ejecutado va a `generation_stages.runtime_info`. |
 | **D-35** | Metadatos de etapa | Solo logs; columnas en `generation_stages` | **Resuelta.** Columnas `warnings`, `llm_runs`, `runtime_info`, expuestas en `GenerationStage`. |
-| **D-36** | Con clustering, ningún RF queda asignado a un cluster | (a) P5/P6 `completed` con 0 unidades y aviso; (b) volver a unidades por HU para esa generación; (c) fallar con `EMPTY_CONTEXT` | **Pendiente.** Hoy se aplicaría (c), lo que contradice que `INSUFFICIENT_REQUIREMENTS` ya no haga fallar la generación (D-32). Recomendación: (b), para que un documento pequeño siga produciendo CP. |
+| **D-36** | Con clustering, ningún RF queda asignado a un cluster | (a) P5/P6 `completed` con 0 unidades y aviso; (b) volver a unidades por HU para esa generación; (c) fallar con `EMPTY_CONTEXT` | **Resuelta: (a).** P5 `completed` con aviso `INSUFFICIENT_CONTEXT` y 0 unidades; P6 y P7 `skipped`; generación `completed`. No es un fallo y no se emite `EMPTY_CONTEXT`. El contrato de P5 admite cero unidades en este caso. |
+| **D-37** | Métricas de P7 v1 | Lista sugerida; ampliada | **Resuelta.** `requirement_coverage` (solo `validated`), `proposed_requirement_coverage` (aparte), `story_coverage`, `cases_per_requirement` y `unassigned_ratio` (solo con clustering; sin clustering no se registra). `formula_version = "v1"`. Fórmulas en P7. |
 
 ---
 
