@@ -81,3 +81,21 @@ def test_error_contracts(client: TestClient, store, validate) -> None:
     assert [r.status_code for r in responses] == [400, 400, 400, 404, 404, 409, 501, 400, 415, 404, 409]
     for response in responses:
         validate(response.json(), "Error")
+
+
+def test_stage_metadata_contract(store, validate) -> None:
+    from ai_service.schemas.generations import LlmRun, StageKey, StageStatus, StageWarning
+    from ai_service.services.generations import to_generation
+
+    generation_id = add_generation(
+        store, document_id=DOCUMENT_ID, status=GenerationStatus.COMPLETED,
+        stage_statuses={StageKey.P2: StageStatus.COMPLETED, StageKey.P7: StageStatus.FAILED},
+    )
+    record = store.generations[generation_id]
+    record.stages[1].warnings = [StageWarning(code="NO_REQUIREMENTS_EXTRACTED", message="Sin requisitos.")]
+    record.stages[1].llm_runs = [LlmRun(provider="fake", model="m", prompt_version="v1", attempts=2, unit_id=None)]
+    record.stages[1].runtime_info = {"model": "m"}
+    record.stages[6].error_code = "INTERNAL_ERROR"
+    record.stages[6].error_message = "La etapa falló."
+
+    validate(to_generation(record).model_dump(mode="json"), "Generation")

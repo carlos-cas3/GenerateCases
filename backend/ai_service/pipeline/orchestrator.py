@@ -14,9 +14,11 @@ from ai_service.pipeline.events import (
     StageSkipped,
     StageStarted,
 )
-from ai_service.pipeline.stages.base import StageBase
+from ai_service.pipeline.stages.base import StageBase, StageError, StageResult
 
 logger = logging.getLogger(__name__)
+
+INTERNAL_STAGE_ERROR_CODE = "INTERNAL_ERROR"
 
 
 class PipelineOrchestrator:
@@ -34,42 +36,67 @@ class PipelineOrchestrator:
         return stage.requires_clustering and not context.configuration.clustering_enabled
 
     async def run(self, context: PipelineContext) -> bool:
-        """Ejecuta el pipeline. Devuelve `True` si terminó sin fallos de etapa.
+        """Ejecuta el pipeline. Devuelve `True` si la generación termina `completed`.
 
+        Una etapa que devuelve `skip_remaining` marca `skipped` todas las posteriores (D-29).
+        El fallo de una etapa no bloqueante (P7) se registra, pero la generación se completa.
         Los errores del `reporter` (escrituras de estado) no se capturan: se propagan.
         """
         generation_id = context.generation_id
+        skip_remaining = False
         for stage in self._stages:
             stage_key = stage.key
-            if self.should_skip(stage, context):
+            if skip_remaining or self.should_skip(stage, context):
                 logger.info("Etapa omitida generation_id=%s stage_key=%s", generation_id, stage_key.value)
                 await self._reporter.report(StageSkipped(generation_id=generation_id, stage_key=stage_key))
                 continue
 
             await self._reporter.report(StageStarted(generation_id=generation_id, stage_key=stage_key))
             logger.info("Etapa iniciada generation_id=%s stage_key=%s", generation_id, stage_key.value)
+            definition = get_stage_definition(stage_key)
             try:
-                await stage.run(context)
+                result = await stage.run(context) or StageResult()
+            except StageError as exc:
+                logger.warning(
+                    "Etapa fallida generation_id=%s stage_key=%s error_code=%s",
+                    generation_id, stage_key.value, exc.code,
+                )
+                error_code, error_message = exc.code, exc.message
             except Exception:
                 logger.exception("Etapa fallida generation_id=%s stage_key=%s", generation_id, stage_key.value)
-                name = get_stage_definition(stage_key).name
+                error_code = INTERNAL_STAGE_ERROR_CODE
+                error_message = f"La etapa '{definition.name}' falló durante la ejecución."
+            else:
                 await self._reporter.report(
-                    StageFailed(
+                    StageCompleted(
                         generation_id=generation_id,
                         stage_key=stage_key,
-                        error_message=f"La etapa '{name}' falló durante la ejecución.",
+                        warnings=result.warnings,
+                        llm_runs=result.llm_runs,
+                        runtime_info=result.runtime_info,
                     )
                 )
+                logger.info("Etapa completada generation_id=%s stage_key=%s", generation_id, stage_key.value)
+                skip_remaining = result.skip_remaining
+                continue
+
+            await self._reporter.report(
+                StageFailed(
+                    generation_id=generation_id,
+                    stage_key=stage_key,
+                    error_code=error_code,
+                    error_message=error_message,
+                )
+            )
+            if definition.blocking:
                 await self._reporter.report(
                     PipelineFailed(
                         generation_id=generation_id,
-                        error_message=f"La generación falló en la etapa '{name}'.",
+                        error_message=f"La generación falló en la etapa '{definition.name}'.",
                     )
                 )
                 return False
-
-            await self._reporter.report(StageCompleted(generation_id=generation_id, stage_key=stage_key))
-            logger.info("Etapa completada generation_id=%s stage_key=%s", generation_id, stage_key.value)
+            logger.info("Fallo no bloqueante generation_id=%s stage_key=%s", generation_id, stage_key.value)
 
         await self._reporter.report(PipelineCompleted(generation_id=generation_id))
         logger.info("Pipeline completado generation_id=%s", generation_id)

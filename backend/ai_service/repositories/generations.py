@@ -2,17 +2,25 @@
 
 import asyncio
 import logging
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Sequence
 from datetime import datetime
 from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
 from postgrest.exceptions import APIError
+from pydantic import BaseModel
 from postgrest.types import CountMethod
 from supabase import Client
 
 from ai_service.core.errors import DocumentNotFound, GenerationInProgress, GenerationNotFound, InvalidStateTransition
-from ai_service.schemas.generations import ACTIVE_GENERATION_STATUSES, GenerationStatus, StageKey, StageStatus
+from ai_service.schemas.generations import (
+    ACTIVE_GENERATION_STATUSES,
+    GenerationStatus,
+    LlmRun,
+    StageKey,
+    StageStatus,
+    StageWarning,
+)
 from ai_service.schemas.records import GenerationRecord
 
 logger = logging.getLogger(__name__)
@@ -86,26 +94,43 @@ class GenerationsRepository(Protocol):
         started_at: datetime | None = None,
         completed_at: datetime | None = None,
         error_message: str | None = None,
+        error_code: str | None = None,
+        warnings: Sequence[StageWarning] | None = None,
+        llm_runs: Sequence[LlmRun] | None = None,
+        runtime_info: dict[str, Any] | None = None,
     ) -> None:
-        """Actualiza una etapa solo si su estado actual es `expected`; si no, `InvalidStateTransition`."""
+        """Actualiza una etapa solo si su estado actual es `expected`; si no, `InvalidStateTransition`.
+
+        Los campos en `None` no se modifican.
+        """
         ...
 
     async def delete(self, generation_id: UUID) -> None:
         """Elimina una generación final. Lanza `GenerationNotFound` o `GenerationInProgress`."""
         ...
 
-    async def mark_interrupted(self, *, message: str, at: datetime) -> list[UUID]:
-        """Marca `failed` las generaciones activas y su etapa `running`. Devuelve sus ids."""
+    async def mark_interrupted(self, *, message: str, code: str, at: datetime) -> list[UUID]:
+        """Marca `failed` las generaciones activas y su etapa `running` (con `code`). Devuelve sus ids."""
         ...
 
 
 def _payload(**fields: Any) -> dict[str, Any]:
-    """Construye el cuerpo de un UPDATE omitiendo `None` y serializando fechas en ISO 8601."""
+    """Construye el cuerpo de un UPDATE omitiendo `None`.
+
+    Fechas en ISO 8601; dicts y secuencias de modelos como JSON (columnas `jsonb`); el resto como texto.
+    """
     result: dict[str, Any] = {}
     for name, value in fields.items():
         if value is None:
             continue
-        result[name] = value.isoformat() if isinstance(value, datetime) else str(value)
+        if isinstance(value, datetime):
+            result[name] = value.isoformat()
+        elif isinstance(value, dict):
+            result[name] = value
+        elif isinstance(value, (list, tuple)):
+            result[name] = [item.model_dump(mode="json") if isinstance(item, BaseModel) else item for item in value]
+        else:
+            result[name] = str(value)
     return result
 
 
@@ -249,9 +274,20 @@ class SupabaseGenerationsRepository:
         started_at: datetime | None = None,
         completed_at: datetime | None = None,
         error_message: str | None = None,
+        error_code: str | None = None,
+        warnings: Sequence[StageWarning] | None = None,
+        llm_runs: Sequence[LlmRun] | None = None,
+        runtime_info: dict[str, Any] | None = None,
     ) -> None:
         payload = _payload(
-            status=status.value, started_at=started_at, completed_at=completed_at, error_message=error_message
+            status=status.value,
+            started_at=started_at,
+            completed_at=completed_at,
+            error_message=error_message,
+            error_code=error_code,
+            warnings=warnings,
+            llm_runs=llm_runs,
+            runtime_info=runtime_info,
         )
         response = await self._run(
             lambda: self._client.table("generation_stages")
@@ -283,7 +319,7 @@ class SupabaseGenerationsRepository:
         if result != "deleted":
             raise RuntimeError(f"Resultado inesperado de delete_generation_if_final: {result!r}")
 
-    async def mark_interrupted(self, *, message: str, at: datetime) -> list[UUID]:
+    async def mark_interrupted(self, *, message: str, code: str, at: datetime) -> list[UUID]:
         active = [value.value for value in ACTIVE_GENERATION_STATUSES]
         response = await self._run(
             lambda: self._client.table("generations").select("id").in_("status", active).execute()
@@ -295,7 +331,7 @@ class SupabaseGenerationsRepository:
         failed = _payload(error_message=message, completed_at=at)
         await self._run(
             lambda: self._client.table("generation_stages")
-            .update({"status": StageStatus.FAILED.value, **failed})
+            .update({"status": StageStatus.FAILED.value, "error_code": code, **failed})
             .in_("generation_id", ids)
             .eq("status", StageStatus.RUNNING.value)
             .execute()

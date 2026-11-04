@@ -47,6 +47,10 @@ create table if not exists public.generation_stages (
     status         text    not null default 'pending'
                    check (status in ('pending', 'running', 'completed', 'failed', 'skipped')),
     error_message  text,
+    error_code     text,                                  -- D-28: código estable del StageError
+    warnings       jsonb   not null default '[]'::jsonb,  -- D-35: avisos no bloqueantes
+    llm_runs       jsonb   not null default '[]'::jsonb,  -- D-35: consumo del LLM por llamada
+    runtime_info   jsonb,                                 -- D-34/D-35: configuración efectiva de la etapa
     started_at     timestamptz,
     completed_at   timestamptz,
     constraint generation_stages_key_order_match check (stage_order = substring(stage_key from 2)::integer),
@@ -66,8 +70,19 @@ create table if not exists public.user_stories (
     action             text,
     goal               text,
     validation_status  text,
+    -- D-27: clasificación de P2 (explica por qué una HU no tiene RF)
+    classification            text,
+    classification_rationale  text,
+    clarification_items       jsonb not null default '[]'::jsonb,
+    -- Orden de aparición en el documento (base 1). Los listados ordenan por esta columna.
+    position           integer check (position > 0),
+    constraint user_stories_validation_status_check
+        check (validation_status in ('valid', 'valid_with_warnings', 'invalid')),
+    constraint user_stories_classification_check
+        check (classification in ('candidata_funcional', 'requiere_aclaracion', 'no_aplicable')),
     constraint user_stories_generation_code_uq unique (generation_id, code),
-    constraint user_stories_generation_id_uq unique (generation_id, id)
+    constraint user_stories_generation_id_uq unique (generation_id, id),
+    constraint user_stories_generation_position_uq unique (generation_id, position)
 );
 
 -- -----------------------------------------------------------------------------
@@ -120,6 +135,18 @@ create table if not exists public.cluster_requirements (
     primary key (generation_id, cluster_id, requirement_id),
     foreign key (generation_id, cluster_id)
         references public.clusters (generation_id, id) on delete cascade,
+    foreign key (generation_id, requirement_id)
+        references public.functional_requirements (generation_id, id) on delete cascade
+);
+
+-- -----------------------------------------------------------------------------
+-- 3.8b unassigned_requirements (D-32): RF que P4 no asignó a ningún cluster.
+-- Se guardan y se muestran; por ahora no generan casos de prueba.
+-- -----------------------------------------------------------------------------
+create table if not exists public.unassigned_requirements (
+    generation_id   uuid not null references public.generations (id) on delete cascade,
+    requirement_id  uuid not null,
+    primary key (generation_id, requirement_id),
     foreign key (generation_id, requirement_id)
         references public.functional_requirements (generation_id, id) on delete cascade
 );
@@ -203,6 +230,32 @@ create table if not exists public.metric_findings (
 );
 
 -- -----------------------------------------------------------------------------
+-- 5. Migración aditiva para esquemas ya desplegados (Fase 3, D-26 a D-35).
+-- Repite las columnas y restricciones añadidas arriba; es idempotente.
+-- -----------------------------------------------------------------------------
+alter table public.generation_stages
+    add column if not exists error_code   text,
+    add column if not exists warnings     jsonb not null default '[]'::jsonb,
+    add column if not exists llm_runs     jsonb not null default '[]'::jsonb,
+    add column if not exists runtime_info jsonb;
+
+alter table public.user_stories
+    add column if not exists classification           text,
+    add column if not exists classification_rationale text,
+    add column if not exists clarification_items      jsonb not null default '[]'::jsonb,
+    add column if not exists position                 integer check (position > 0);
+
+alter table public.user_stories drop constraint if exists user_stories_validation_status_check;
+alter table public.user_stories add constraint user_stories_validation_status_check
+    check (validation_status in ('valid', 'valid_with_warnings', 'invalid'));
+alter table public.user_stories drop constraint if exists user_stories_classification_check;
+alter table public.user_stories add constraint user_stories_classification_check
+    check (classification in ('candidata_funcional', 'requiere_aclaracion', 'no_aplicable'));
+alter table public.user_stories drop constraint if exists user_stories_generation_position_uq;
+alter table public.user_stories add constraint user_stories_generation_position_uq
+    unique (generation_id, position);
+
+-- -----------------------------------------------------------------------------
 -- 6. Índices
 -- -----------------------------------------------------------------------------
 -- Criterio:
@@ -253,6 +306,7 @@ alter table public.functional_requirements enable row level security;
 alter table public.user_story_requirements enable row level security;
 alter table public.clusters                enable row level security;
 alter table public.cluster_requirements    enable row level security;
+alter table public.unassigned_requirements enable row level security;
 alter table public.test_cases              enable row level security;
 alter table public.test_steps              enable row level security;
 alter table public.requirement_test_cases  enable row level security;
@@ -317,10 +371,212 @@ begin
 end;
 $$;
 
+-- -----------------------------------------------------------------------------
+-- RPC de persistencia por etapa (D-30). PostgREST no ofrece transacciones entre
+-- tablas: cada función escribe todo el resultado de una etapa (o unidad de P6)
+-- en una sola transacción. Las referencias llegan por `code` y se traducen a
+-- `id` dentro de la generación; un código inexistente aborta todo (23503).
+-- -----------------------------------------------------------------------------
+
+-- P2: clasificación de HU + RF + user_story_requirements.
+-- p_payload = {
+--   "classifications": [{ "user_story_code", "classification", "classification_rationale", "clarification_items": [] }],
+--   "requirements":    [{ "id"?, "code", "description", "source_text"?, "user_story_codes": [] }]
+-- }
+create or replace function public.persist_p2_requirements(
+    p_generation_id uuid,
+    p_payload       jsonb
+) returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+    v_expected integer;
+    v_updated  integer;
+    v_missing  text;
+begin
+    v_expected := jsonb_array_length(coalesce(p_payload -> 'classifications', '[]'::jsonb));
+
+    update public.user_stories us
+    set classification           = c.classification,
+        classification_rationale = c.classification_rationale,
+        clarification_items      = coalesce(c.clarification_items, '[]'::jsonb)
+    from jsonb_to_recordset(coalesce(p_payload -> 'classifications', '[]'::jsonb))
+         as c(user_story_code text, classification text, classification_rationale text, clarification_items jsonb)
+    where us.generation_id = p_generation_id
+      and us.code = c.user_story_code;
+    get diagnostics v_updated = row_count;
+
+    if v_updated <> v_expected then
+        raise exception 'persist_p2_requirements: % de % clasificaciones apuntan a HU inexistentes',
+            v_expected - v_updated, v_expected using errcode = '23503';
+    end if;
+
+    insert into public.functional_requirements (id, generation_id, code, description, source_text)
+    select coalesce(r.id, gen_random_uuid()), p_generation_id, r.code, r.description, r.source_text
+    from jsonb_to_recordset(coalesce(p_payload -> 'requirements', '[]'::jsonb))
+         as r(id uuid, code text, description text, source_text text);
+
+    select l.user_story_code into v_missing
+    from jsonb_to_recordset(coalesce(p_payload -> 'requirements', '[]'::jsonb))
+             as r(code text, user_story_codes jsonb)
+         cross join lateral jsonb_array_elements_text(r.user_story_codes) as l(user_story_code)
+         left join public.user_stories us
+             on us.generation_id = p_generation_id and us.code = l.user_story_code
+    where us.id is null
+    limit 1;
+
+    if found then
+        raise exception 'persist_p2_requirements: la HU % no existe en la generación', v_missing
+            using errcode = '23503';
+    end if;
+
+    insert into public.user_story_requirements (generation_id, user_story_id, requirement_id)
+    select distinct p_generation_id, us.id, fr.id
+    from jsonb_to_recordset(coalesce(p_payload -> 'requirements', '[]'::jsonb))
+             as r(code text, user_story_codes jsonb)
+         cross join lateral jsonb_array_elements_text(r.user_story_codes) as l(user_story_code)
+         join public.functional_requirements fr
+             on fr.generation_id = p_generation_id and fr.code = r.code
+         join public.user_stories us
+             on us.generation_id = p_generation_id and us.code = l.user_story_code;
+end;
+$$;
+
+-- P4: clusters + cluster_requirements + unassigned_requirements.
+-- p_payload = {
+--   "clusters": [{ "id", "name", "description"?, "cluster_label"?,
+--                  "assignments": [{ "requirement_code", "similarity_to_centroid"? }] }],
+--   "unassigned_requirement_codes": []
+-- }
+create or replace function public.persist_p4_clusters(
+    p_generation_id uuid,
+    p_payload       jsonb
+) returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+    v_missing text;
+begin
+    if exists (
+        select 1
+        from jsonb_to_recordset(coalesce(p_payload -> 'clusters', '[]'::jsonb)) as c(id uuid)
+        where c.id is null
+    ) then
+        raise exception 'persist_p4_clusters: todo cluster debe traer su id' using errcode = '23502';
+    end if;
+
+    insert into public.clusters (id, generation_id, name, description, cluster_label)
+    select c.id, p_generation_id, c.name, c.description, c.cluster_label
+    from jsonb_to_recordset(coalesce(p_payload -> 'clusters', '[]'::jsonb))
+         as c(id uuid, name text, description text, cluster_label integer);
+
+    with codes as (
+        select a.requirement_code as code
+        from jsonb_to_recordset(coalesce(p_payload -> 'clusters', '[]'::jsonb)) as c(assignments jsonb)
+             cross join lateral jsonb_to_recordset(coalesce(c.assignments, '[]'::jsonb)) as a(requirement_code text)
+        union
+        select jsonb_array_elements_text(coalesce(p_payload -> 'unassigned_requirement_codes', '[]'::jsonb))
+    )
+    select codes.code into v_missing
+    from codes
+         left join public.functional_requirements fr
+             on fr.generation_id = p_generation_id and fr.code = codes.code
+    where fr.id is null
+    limit 1;
+
+    if found then
+        raise exception 'persist_p4_clusters: el RF % no existe en la generación', v_missing
+            using errcode = '23503';
+    end if;
+
+    insert into public.cluster_requirements (generation_id, cluster_id, requirement_id, similarity_to_centroid)
+    select p_generation_id, c.id, fr.id, a.similarity_to_centroid
+    from jsonb_to_recordset(coalesce(p_payload -> 'clusters', '[]'::jsonb)) as c(id uuid, assignments jsonb)
+         cross join lateral jsonb_to_recordset(coalesce(c.assignments, '[]'::jsonb))
+             as a(requirement_code text, similarity_to_centroid double precision)
+         join public.functional_requirements fr
+             on fr.generation_id = p_generation_id and fr.code = a.requirement_code;
+
+    insert into public.unassigned_requirements (generation_id, requirement_id)
+    select distinct p_generation_id, fr.id
+    from jsonb_array_elements_text(coalesce(p_payload -> 'unassigned_requirement_codes', '[]'::jsonb)) as u(code)
+         join public.functional_requirements fr
+             on fr.generation_id = p_generation_id and fr.code = u.code;
+end;
+$$;
+
+-- P6: una unidad de contexto = casos + pasos + vínculos RF–CP (D-15: todo o nada).
+-- p_payload = {
+--   "test_cases": [{ "id", "code", "title", "objective"?, "preconditions": [], "test_data"?,
+--                    "expected_result"?, "steps": [{ "step_number", "action", "expected_result"? }],
+--                    "requirement_codes": [] }]
+-- }
+-- Los vínculos se insertan siempre en `pending`, sin método de validación, y los
+-- códigos de RF repetidos en un mismo caso se eliminan antes de insertar.
+create or replace function public.persist_p6_unit(
+    p_generation_id uuid,
+    p_payload       jsonb
+) returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+    v_missing text;
+begin
+    if exists (
+        select 1
+        from jsonb_to_recordset(coalesce(p_payload -> 'test_cases', '[]'::jsonb)) as t(id uuid)
+        where t.id is null
+    ) then
+        raise exception 'persist_p6_unit: todo caso de prueba debe traer su id' using errcode = '23502';
+    end if;
+
+    select l.code into v_missing
+    from jsonb_to_recordset(coalesce(p_payload -> 'test_cases', '[]'::jsonb)) as t(requirement_codes jsonb)
+         cross join lateral jsonb_array_elements_text(coalesce(t.requirement_codes, '[]'::jsonb)) as l(code)
+         left join public.functional_requirements fr
+             on fr.generation_id = p_generation_id and fr.code = l.code
+    where fr.id is null
+    limit 1;
+
+    if found then
+        raise exception 'persist_p6_unit: el RF % no existe en la generación', v_missing
+            using errcode = '23503';
+    end if;
+
+    insert into public.test_cases (id, generation_id, code, title, objective, preconditions, test_data, expected_result)
+    select t.id, p_generation_id, t.code, t.title, t.objective,
+           coalesce(t.preconditions, '[]'::jsonb), t.test_data, t.expected_result
+    from jsonb_to_recordset(coalesce(p_payload -> 'test_cases', '[]'::jsonb))
+         as t(id uuid, code text, title text, objective text, preconditions jsonb, test_data jsonb, expected_result text);
+
+    insert into public.test_steps (generation_id, test_case_id, step_number, action, expected_result)
+    select p_generation_id, t.id, s.step_number, s.action, s.expected_result
+    from jsonb_to_recordset(coalesce(p_payload -> 'test_cases', '[]'::jsonb)) as t(id uuid, steps jsonb)
+         cross join lateral jsonb_to_recordset(coalesce(t.steps, '[]'::jsonb))
+             as s(step_number integer, action text, expected_result text);
+
+    insert into public.requirement_test_cases (generation_id, requirement_id, test_case_id)
+    select distinct p_generation_id, fr.id, t.id
+    from jsonb_to_recordset(coalesce(p_payload -> 'test_cases', '[]'::jsonb)) as t(id uuid, requirement_codes jsonb)
+         cross join lateral jsonb_array_elements_text(coalesce(t.requirement_codes, '[]'::jsonb)) as l(code)
+         join public.functional_requirements fr
+             on fr.generation_id = p_generation_id and fr.code = l.code;
+end;
+$$;
+
 revoke execute on function public.create_generation(uuid, boolean, text, jsonb) from public, anon, authenticated;
 revoke execute on function public.delete_generation_if_final(uuid) from public, anon, authenticated;
+revoke execute on function public.persist_p2_requirements(uuid, jsonb) from public, anon, authenticated;
+revoke execute on function public.persist_p4_clusters(uuid, jsonb) from public, anon, authenticated;
+revoke execute on function public.persist_p6_unit(uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.create_generation(uuid, boolean, text, jsonb) to service_role;
 grant execute on function public.delete_generation_if_final(uuid) to service_role;
+grant execute on function public.persist_p2_requirements(uuid, jsonb) to service_role;
+grant execute on function public.persist_p4_clusters(uuid, jsonb) to service_role;
+grant execute on function public.persist_p6_unit(uuid, jsonb) to service_role;
 
 -- -----------------------------------------------------------------------------
 -- Storage: bucket privado para POST /api/v1/documents (DOCUMENTS_BUCKET).

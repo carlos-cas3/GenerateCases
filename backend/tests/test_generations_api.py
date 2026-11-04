@@ -69,7 +69,7 @@ def test_create_keeps_explicit_configuration(client: TestClient, store: InMemory
 
 
 # 2 ---------------------------------------------------------------------------
-def test_happy_path_completes_with_p7_skipped(client: TestClient) -> None:
+def test_happy_path_completes_all_stages(client: TestClient) -> None:
     generation_id = client.post(URL, json={"document_id": str(DOCUMENT_ID)}).json()["id"]
 
     body = client.get(f"{URL}/{generation_id}").json()
@@ -78,11 +78,27 @@ def test_happy_path_completes_with_p7_skipped(client: TestClient) -> None:
     assert body["started_at"] is not None and body["completed_at"] is not None
     assert body["error_message"] is None
     stages = _stages(body)
-    for key in ("p1", "p2", "p3", "p4", "p5", "p6"):
+    for key in ("p1", "p2", "p3", "p4", "p5", "p6", "p7"):
         assert stages[key]["status"] == "completed"
         assert stages[key]["started_at"] is not None and stages[key]["completed_at"] is not None
-    assert stages["p7"]["status"] == "skipped"
-    assert stages["p7"]["started_at"] is None and stages["p7"]["completed_at"] is not None
+        assert stages[key]["error_code"] is None
+        assert stages[key]["warnings"] == [] and stages[key]["llm_runs"] == []
+
+
+def test_p7_failure_does_not_fail_generation(client_factory: ClientFactory) -> None:
+    client = client_factory(pipeline_stub_fail_at_stage="p7")
+    generation_id = client.post(URL, json={"document_id": str(DOCUMENT_ID)}).json()["id"]
+
+    body = client.get(f"{URL}/{generation_id}").json()
+
+    assert body["status"] == "completed"
+    assert body["error_message"] is None
+    stages = _stages(body)
+    assert stages["p7"]["status"] == "failed"
+    assert stages["p7"]["error_code"] == "INTERNAL_ERROR"
+    assert "Fallo simulado" not in stages["p7"]["error_message"]
+    for key in ("p1", "p2", "p3", "p4", "p5", "p6"):
+        assert stages[key]["status"] == "completed"
 
 
 # 3 ---------------------------------------------------------------------------
@@ -94,11 +110,11 @@ def test_clustering_disabled_skips_p3_p4(client: TestClient) -> None:
 
     assert body["status"] == "completed"
     stages = _stages(body)
-    for key in ("p3", "p4", "p7"):
+    for key in ("p3", "p4"):
         assert stages[key]["status"] == "skipped"
         assert stages[key]["started_at"] is None
         assert stages[key]["completed_at"] is not None
-    for key in ("p1", "p2", "p5", "p6"):
+    for key in ("p1", "p2", "p5", "p6", "p7"):
         assert stages[key]["status"] == "completed"
 
 
@@ -119,6 +135,7 @@ def test_injected_failure_at_p4(client_factory: ClientFactory) -> None:
     assert "Traceback" not in stages["p4"]["error_message"]
     assert "Fallo simulado" not in stages["p4"]["error_message"]
     assert stages["p4"]["completed_at"] is not None
+    assert stages["p4"]["error_code"] == "INTERNAL_ERROR"
     for key in ("p5", "p6", "p7"):
         assert stages[key]["status"] == "pending"
         assert stages[key]["started_at"] is None and stages[key]["completed_at"] is None
