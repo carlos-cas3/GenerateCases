@@ -2,7 +2,7 @@
 
 import itertools
 import logging
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -13,8 +13,10 @@ from ai_service.core.time import utc_now
 from ai_service.schemas.generations import (
     ACTIVE_GENERATION_STATUSES,
     GenerationStatus,
+    LlmRun,
     StageKey,
     StageStatus,
+    StageWarning,
 )
 from ai_service.schemas.records import DocumentRecord, GenerationRecord, StageRecord
 
@@ -194,6 +196,10 @@ class InMemoryGenerationsRepository:
         started_at: datetime | None = None,
         completed_at: datetime | None = None,
         error_message: str | None = None,
+        error_code: str | None = None,
+        warnings: Sequence[StageWarning] | None = None,
+        llm_runs: Sequence[LlmRun] | None = None,
+        runtime_info: dict[str, Any] | None = None,
     ) -> None:
         record = self._store.generations.get(generation_id)
         stage = next((s for s in record.stages if s.stage_key == stage_key), None) if record else None
@@ -212,6 +218,14 @@ class InMemoryGenerationsRepository:
             stage.completed_at = completed_at
         if error_message is not None:
             stage.error_message = error_message
+        if error_code is not None:
+            stage.error_code = error_code
+        if warnings is not None:
+            stage.warnings = list(warnings)
+        if llm_runs is not None:
+            stage.llm_runs = list(llm_runs)
+        if runtime_info is not None:
+            stage.runtime_info = dict(runtime_info)
 
     async def delete(self, generation_id: UUID) -> None:
         record = self._store.generations.get(generation_id)
@@ -222,7 +236,7 @@ class InMemoryGenerationsRepository:
         del self._store.generations[generation_id]
         del self._store.insertion_order[generation_id]
 
-    async def mark_interrupted(self, *, message: str, at: datetime) -> list[UUID]:
+    async def mark_interrupted(self, *, message: str, code: str, at: datetime) -> list[UUID]:
         interrupted: list[UUID] = []
         for record in self._store.generations.values():
             if record.status not in ACTIVE_GENERATION_STATUSES:
@@ -231,6 +245,7 @@ class InMemoryGenerationsRepository:
                 if stage.status == StageStatus.RUNNING:
                     stage.status = StageStatus.FAILED
                     stage.error_message = message
+                    stage.error_code = code
                     stage.completed_at = at
             record.status = GenerationStatus.FAILED
             record.error_message = message

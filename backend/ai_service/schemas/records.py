@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ai_service.schemas.generations import GenerationStatus, StageKey, StageStatus
+from ai_service.schemas.generations import GenerationStatus, LlmRun, StageKey, StageStatus, StageWarning
 
 
 class DocumentRecord(BaseModel):
@@ -32,6 +32,10 @@ class StageRecord(BaseModel):
     stage_order: int
     status: StageStatus
     error_message: str | None = None
+    error_code: str | None = None
+    warnings: list[StageWarning] = Field(default_factory=list)
+    llm_runs: list[LlmRun] = Field(default_factory=list)
+    runtime_info: dict[str, Any] | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
 

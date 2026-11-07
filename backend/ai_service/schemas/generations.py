@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -66,6 +67,31 @@ class CreateGenerationRequest(BaseModel):
     configuration: GenerationConfiguration = Field(default_factory=GenerationConfiguration)
 
 
+class StageWarning(BaseModel):
+    """Aviso no bloqueante de una etapa (`generation_stages.warnings`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    code: str
+    message: str
+    details: dict[str, Any] | None = None
+
+
+class LlmRun(BaseModel):
+    """Una llamada al LLM (`generation_stages.llm_runs`). Solo P2 y P6."""
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: str
+    model: str
+    prompt_version: str
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    attempts: int = Field(ge=1)
+    latency_ms: int | None = Field(default=None, ge=0)
+    unit_id: str | None = None
+
+
 class GenerationStage(BaseModel):
     """Etapa P1–P7. `name` proviene del catálogo del código."""
 
@@ -73,6 +99,10 @@ class GenerationStage(BaseModel):
     name: str
     status: StageStatus
     error_message: str | None
+    error_code: str | None = None
+    warnings: list[StageWarning] = Field(default_factory=list)
+    llm_runs: list[LlmRun] = Field(default_factory=list)
+    runtime_info: dict[str, Any] | None = None
     started_at: datetime | None
     completed_at: datetime | None
     order: int = Field(ge=1, le=7)
@@ -88,6 +118,7 @@ class GenerationSummary(BaseModel):
     """Conteos calculados desde datos persistidos. No se usa en la Fase 1 (`summary = null`)."""
 
     user_stories_count: int | None = None
+    invalid_user_stories_count: int | None = None
     requirements_count: int | None = None
     clusters_count: int | None = None
     test_cases_count: int | None = None

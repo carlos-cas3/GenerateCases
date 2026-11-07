@@ -41,14 +41,26 @@ info:
     - **Agrupamiento ≠ cobertura:** pertenecer a un cluster no implica que un caso de prueba
       cubra el requisito.
     - **Resultados parciales:** los endpoints de resultados devuelven lo que esté persistido.
-      Si la generación aún no terminó, o el clustering está deshabilitado, las listas pueden
-      venir vacías (no es un error).
+      Cada etapa guarda su resultado al terminar, de forma atómica (D-30). Si la generación
+      aún no terminó, o el clustering está deshabilitado, las listas de clusters pueden venir
+      vacías (no es un error). Una generación `failed` **puede tener resultados ya guardados** de las etapas
+      anteriores al fallo, incluidos casos de prueba de las unidades de P6 que terminaron
+      antes de que otra fallara (D-15): `failed` no implica cero resultados.
+    - **Orden de los listados:** las historias de usuario se ordenan por `position` (orden de
+      aparición en el documento).
     - **Paginación:** `limit` (1–100, por defecto 20) y `offset`.
     - **Errores:** formato común `{ "error": { "code", "message", "details" } }`.
-    - **Etapas:** si una etapa falla, queda en `failed`, las siguientes permanecen en `pending`
-      y la generación termina en `failed`. `skipped` solo se usa para etapas omitidas por el
-      flujo: P3 y P4 con clustering deshabilitado, y P7 mientras no esté implementada. El
-      detalle de cada etapa está en `docs/pipeline-orchestration.md`.
+    - **Etapas:** si una etapa P1–P6 falla, queda en `failed` con `error_code` y
+      `error_message`, las siguientes permanecen en `pending` y la generación termina en
+      `failed`. P7 (evaluación) siempre se ejecuta cuando hay requisitos; si falla, la
+      generación termina igualmente en `completed`, porque sus métricas son informativas.
+      `skipped` solo se usa para etapas omitidas por el flujo: P3 y P4 con clustering
+      deshabilitado, y P3–P7 cuando P2 no extrae ningún requisito (P2 queda `completed` con el
+      aviso `NO_REQUIREMENTS_EXTRACTED`). P6 y P7 también quedan `skipped` cuando, con
+      clustering activo, ningún RF queda asignado a un cluster (P5 `completed` con el aviso
+      `INSUFFICIENT_CONTEXT`, D-36). Sin clustering, P5 y P6 se ejecutan: P5 forma lotes de RF
+      (D-39). El detalle de cada etapa está en
+      `docs/prompts_fases/Fase 3/pipeline_design.md`.
     - Los endpoints marcados con `x-status: proposed` son extensiones propuestas que aún no
       figuran en el README.
   contact:
@@ -217,9 +229,11 @@ paths:
       operationId: createGeneration
       summary: Crear una generación a partir de un documento
       description: |
-        Valida el documento, registra la generación (`queued`) con su configuración
-        (`clustering_enabled`, `method_type` y copia en `config_snapshot`) y sus siete etapas
-        en `pending`, y programa el pipeline. La respuesta es inmediata (`202 Accepted`); el
+        Valida el documento y comprueba las dependencias de IA (el LLM siempre; el servicio de
+        embeddings solo si `semantic_clustering_enabled=true`). Después registra la generación
+        (`queued`) con su configuración (`clustering_enabled`, `method_type` y copia en
+        `config_snapshot`, que queda fija desde este momento) y sus siete etapas en `pending`,
+        y programa el pipeline. La respuesta es inmediata (`202 Accepted`); el
         progreso se consulta con polling sobre `GET /generations/{generation_id}`.
       requestBody:
         required: true
@@ -247,8 +261,8 @@ paths:
                   semantic_clustering_enabled: true
                   method_type: llm_pipeline
                 stages:
-                  - { key: p1, name: Normalización de historias de usuario, status: pending, error_message: null, started_at: null, completed_at: null, order: 1 }
-                  - { key: p2, name: Extracción de requisitos funcionales, status: pending, error_message: null, started_at: null, completed_at: null, order: 2 }
+                  - { key: p1, name: Procesamiento, segmentación y estructuración de HU, status: pending, error_message: null, started_at: null, completed_at: null, order: 1 }
+                  - { key: p2, name: Clasificación de HU y extracción de RF, status: pending, error_message: null, started_at: null, completed_at: null, order: 2 }
                   - { key: p3, name: Generación de embeddings, status: pending, error_message: null, started_at: null, completed_at: null, order: 3 }
                   - { key: p4, name: Clustering semántico, status: pending, error_message: null, started_at: null, completed_at: null, order: 4 }
                   - { key: p5, name: Construcción de contexto estructurado, status: pending, error_message: null, started_at: null, completed_at: null, order: 5 }
@@ -264,7 +278,10 @@ paths:
         "404":
           $ref: "#/components/responses/DocumentNotFound"
         "503":
-          description: Falló la comprobación previa de las dependencias de IA (LLM o embeddings). La generación quedó registrada como `failed` y su id viene en `details.generation_id`.
+          description: |
+            Falló la comprobación previa de las dependencias de IA (LLM o embeddings). La
+            comprobación se hace **antes** de crear la generación, así que no se registra nada.
+            `details.dependency` indica qué servicio falló.
           content:
             application/json:
               schema:
@@ -274,7 +291,7 @@ paths:
                   code: AI_SERVICE_UNAVAILABLE
                   message: No se pudo iniciar la ejecución en el servicio de IA.
                   details:
-                    generation_id: b7a2f9c4-8e31-4f6a-9d2c-1a5e7f0b3c88
+                    dependency: llm
         "500":
           $ref: "#/components/responses/InternalServerError"
     get:
@@ -336,8 +353,8 @@ paths:
                   semantic_clustering_enabled: true
                   method_type: llm_pipeline
                 stages:
-                  - { key: p1, name: Normalización de historias de usuario, status: completed, error_message: null, started_at: "2026-10-25T12:05:01Z", completed_at: "2026-10-25T12:05:02Z", order: 1 }
-                  - { key: p2, name: Extracción de requisitos funcionales, status: completed, error_message: null, started_at: "2026-10-25T12:05:02Z", completed_at: "2026-10-25T12:06:10Z", order: 2 }
+                  - { key: p1, name: Procesamiento, segmentación y estructuración de HU, status: completed, error_message: null, started_at: "2026-10-25T12:05:01Z", completed_at: "2026-10-25T12:05:02Z", order: 1 }
+                  - { key: p2, name: Clasificación de HU y extracción de RF, status: completed, error_message: null, started_at: "2026-10-25T12:05:02Z", completed_at: "2026-10-25T12:06:10Z", order: 2 }
                   - { key: p3, name: Generación de embeddings, status: completed, error_message: null, started_at: "2026-10-25T12:06:10Z", completed_at: "2026-10-25T12:06:40Z", order: 3 }
                   - { key: p4, name: Clustering semántico, status: completed, error_message: null, started_at: "2026-10-25T12:06:40Z", completed_at: "2026-10-25T12:06:45Z", order: 4 }
                   - { key: p5, name: Construcción de contexto estructurado, status: completed, error_message: null, started_at: "2026-10-25T12:06:45Z", completed_at: "2026-10-25T12:06:46Z", order: 5 }
@@ -413,7 +430,10 @@ paths:
       tags: [Results]
       operationId: listUserStories
       summary: Listar historias de usuario procesadas
-      description: Fuente - tabla `user_stories`, con los `requirement_ids` obtenidos de `user_story_requirements`.
+      description: |
+        Fuente - tabla `user_stories`, con los `requirement_ids` obtenidos de
+        `user_story_requirements`. Ordenadas por `position`. Incluye las HU `invalid` (que no
+        pasan a P2) y la clasificación de P2, que explica por qué una HU no tiene requisitos.
       parameters:
         - $ref: "#/components/parameters/GenerationId"
         - $ref: "#/components/parameters/Limit"
@@ -462,9 +482,11 @@ paths:
       operationId: listClusters
       summary: Consultar grupos semánticos y sus requisitos
       description: |
-        Combina `clusters` y `cluster_requirements`. Si la generación se ejecutó con
-        `semantic_clustering_enabled=false`, `items` viene vacío. La pertenencia a un grupo
-        no implica cobertura por un caso de prueba.
+        Combina `clusters`, `cluster_requirements` y `unassigned_requirements`. Si la generación
+        se ejecutó con `semantic_clustering_enabled=false`, `items` y
+        `unassigned_requirement_ids` vienen vacíos. La pertenencia a un grupo no implica
+        cobertura por un caso de prueba. Los requisitos sin grupo se listan aparte y, por ahora,
+        no generan casos de prueba (D-32).
       parameters:
         - $ref: "#/components/parameters/GenerationId"
       responses:
@@ -530,7 +552,7 @@ paths:
                 title: Inicio de sesión con credenciales válidas
                 objective: Verificar que un usuario registrado accede al sistema.
                 preconditions: ["El usuario está registrado", "El usuario está activo"]
-                test_data: { email: usuario@ejemplo.com, password: Valida123 }
+                test_data: { inputs: { email: usuario@ejemplo.com, password: Valida123 } }
                 expected_result: El sistema muestra el panel principal.
                 steps_count: 2
                 requirement_ids: [3a4b5c6d-7e8f-4a1b-9c2d-3e4f5a6b7c8d]
@@ -936,14 +958,19 @@ components:
       enum: [pending, running, completed, failed, skipped]
       description: |
         `skipped`: etapa omitida por una condición del flujo (P3 y P4 con clustering
-        deshabilitado; P7 mientras no esté implementada). Si una etapa falla, las posteriores
-        quedan en `pending`, no en `skipped`.
+        deshabilitado; P3–P7 cuando P2 no extrae requisitos; P6–P7 cuando, con clustering
+        activo, ningún RF queda asignado a un cluster, D-36). Sin clustering, P5 y P6 se
+        ejecutan: P5 forma lotes de RF (D-39). Si una etapa falla, las
+        posteriores quedan en `pending`, no en `skipped`. `failed` en P7 no hace fallar la
+        generación.
     GenerationConfiguration:
       type: object
       description: |
         Parámetros de la ejecución. `semantic_clustering_enabled` se persiste en
         `generations.clustering_enabled` y `method_type` en `generations.method_type`; el
-        conjunto completo aplicado queda en `config_snapshot`.
+        conjunto completo aplicado queda en `config_snapshot`. `semantic_clustering_enabled`
+        determina `strategy` en P5 (`by_cluster`/`by_user_story`) y la variante de prompt de P6
+        (`contexto`/`contexto_sin_clustering`, D-38).
       properties:
         semantic_clustering_enabled:
           type: boolean
@@ -971,9 +998,54 @@ components:
         name: { type: string }
         status: { $ref: "#/components/schemas/StageStatus" }
         error_message: { type: [string, "null"] }
+        error_code:
+          type: [string, "null"]
+          description: Código estable del error de la etapa (p. ej. `NO_STORIES_FOUND`, `LLM_INVALID_OUTPUT`).
+          examples: [NO_STORIES_FOUND]
+        warnings:
+          type: array
+          description: Avisos no bloqueantes de la etapa (p. ej. `NO_REQUIREMENTS_EXTRACTED` en P2).
+          items: { $ref: "#/components/schemas/StageWarning" }
+        llm_runs:
+          type: array
+          description: Llamadas al LLM de la etapa (solo P2 y P6).
+          items: { $ref: "#/components/schemas/LlmRun" }
+        runtime_info:
+          type: [object, "null"]
+          description: |
+            Configuración efectivamente usada por la etapa (modelo, dimensión de embeddings,
+            algoritmo de clustering…). `config_snapshot` guarda lo solicitado; esto, lo ejecutado.
+            En P6 incluye `prompt_variant` y `prompt_version` (D-38).
+          additionalProperties: true
         started_at: { type: [string, "null"], format: date-time }
         completed_at: { type: [string, "null"], format: date-time }
         order: { type: integer, minimum: 1, maximum: 7 }
+    StageWarning:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, examples: [NO_REQUIREMENTS_EXTRACTED] }
+        message: { type: string }
+        details:
+          type: [object, "null"]
+          additionalProperties: true
+    LlmRun:
+      type: object
+      required: [provider, model, prompt_version, attempts]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+        prompt_version:
+          type: string
+          description: |
+            Variante concreta del prompt ejecutado (p. ej. `contexto@p6-v1` o
+            `contexto_sin_clustering@p6-v1`, D-38).
+          examples: ["contexto@p6-v1"]
+        input_tokens: { type: [integer, "null"], minimum: 0 }
+        output_tokens: { type: [integer, "null"], minimum: 0 }
+        attempts: { type: integer, minimum: 1 }
+        latency_ms: { type: [integer, "null"], minimum: 0 }
+        unit_id: { type: [string, "null"], description: Unidad de contexto de P6, si aplica. }
     MetricSummary:
       type: object
       required: [metric_name, metric_value, formula_version]
@@ -985,7 +1057,12 @@ components:
       type: object
       description: Conteos calculados desde las tablas persistidas. Los campos son `null` mientras no haya datos.
       properties:
-        user_stories_count: { type: [integer, "null"] }
+        user_stories_count:
+          type: [integer, "null"]
+          description: Historias de usuario procesables (sin las `invalid`).
+        invalid_user_stories_count:
+          type: [integer, "null"]
+          description: Historias guardadas con `validation_status=invalid`; no pasan a P2.
         requirements_count: { type: [integer, "null"] }
         clusters_count: { type: [integer, "null"] }
         test_cases_count: { type: [integer, "null"] }
@@ -1043,7 +1120,24 @@ components:
         goal: { type: [string, "null"] }
         validation_status:
           type: [string, "null"]
-          description: Estado de validación de la historia. Los valores admitidos están pendientes de definición.
+          enum: [valid, valid_with_warnings, invalid, null]
+          description: |
+            Estado del procesamiento estructural de P1, no de la clasificación funcional.
+            `invalid`: no pudo procesarse como unidad; se guarda con su texto original, pero no
+            pasa a P2.
+        classification:
+          type: [string, "null"]
+          enum: [candidata_funcional, requiere_aclaracion, no_aplicable, null]
+          description: Clasificación funcional de P2. `null` si la HU no llegó a clasificarse.
+        classification_rationale: { type: [string, "null"] }
+        clarification_items:
+          type: array
+          description: Aspectos que requieren aclaración (sobre todo con `requiere_aclaracion`).
+          items: { type: string }
+        position:
+          type: [integer, "null"]
+          minimum: 1
+          description: Orden de aparición en el documento (base 1).
         requirement_ids:
           type: array
           items: { type: string, format: uuid }
@@ -1101,11 +1195,15 @@ components:
           items: { $ref: "#/components/schemas/ClusterRequirement" }
     ClusterList:
       type: object
-      required: [items]
+      required: [items, unassigned_requirement_ids]
       properties:
         items:
           type: array
           items: { $ref: "#/components/schemas/Cluster" }
+        unassigned_requirement_ids:
+          type: array
+          description: Requisitos que P4 no asignó a ningún grupo (tabla `unassigned_requirements`).
+          items: { type: string, format: uuid }
 
     # ---------- Casos de prueba ----------
     RelationStatus:
@@ -1157,15 +1255,34 @@ components:
               description: Lista de precondiciones (JSONB).
               items: { type: string }
             test_data:
-              type: [object, "null"]
-              description: Datos necesarios para ejecutar el caso (JSONB). Estructura libre; ver decisión pendiente 7.
-              additionalProperties: true
+              description: Datos necesarios para ejecutar el caso (JSONB). Estructura en D-26.
+              oneOf:
+                - $ref: "#/components/schemas/TestData"
+                - type: "null"
             steps:
               type: array
               items: { $ref: "#/components/schemas/TestStep" }
             requirements:
               type: array
               items: { $ref: "#/components/schemas/TestCaseRequirementLink" }
+    TestData:
+      type: object
+      description: |
+        Estructura de `test_cases.test_data` (D-26). Todas las claves son opcionales; P6 trata
+        una clave desconocida como `LLM_INVALID_OUTPUT`.
+      additionalProperties: false
+      properties:
+        preconditions:
+          type: array
+          items: { type: string }
+        inputs:
+          type: object
+          description: Datos de entrada clave-valor.
+          additionalProperties: true
+        expected_results:
+          type: array
+          items: { type: string }
+        notes: { type: [string, "null"] }
     TestCaseList:
       type: object
       required: [items, pagination]
