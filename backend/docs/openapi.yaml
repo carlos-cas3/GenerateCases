@@ -42,8 +42,8 @@ info:
       cubra el requisito.
     - **Resultados parciales:** los endpoints de resultados devuelven lo que esté persistido.
       Cada etapa guarda su resultado al terminar, de forma atómica (D-30). Si la generación
-      aún no terminó, o el clustering está deshabilitado, las listas pueden venir vacías (no es
-      un error). Una generación `failed` **puede tener resultados ya guardados** de las etapas
+      aún no terminó, o el clustering está deshabilitado, las listas de clusters pueden venir
+      vacías (no es un error). Una generación `failed` **puede tener resultados ya guardados** de las etapas
       anteriores al fallo, incluidos casos de prueba de las unidades de P6 que terminaron
       antes de que otra fallara (D-15): `failed` no implica cero resultados.
     - **Orden de los listados:** las historias de usuario se ordenan por `position` (orden de
@@ -56,7 +56,10 @@ info:
       generación termina igualmente en `completed`, porque sus métricas son informativas.
       `skipped` solo se usa para etapas omitidas por el flujo: P3 y P4 con clustering
       deshabilitado, y P3–P7 cuando P2 no extrae ningún requisito (P2 queda `completed` con el
-      aviso `NO_REQUIREMENTS_EXTRACTED`). El detalle de cada etapa está en
+      aviso `NO_REQUIREMENTS_EXTRACTED`). P6 y P7 también quedan `skipped` cuando, con
+      clustering activo, ningún RF queda asignado a un cluster (P5 `completed` con el aviso
+      `INSUFFICIENT_CONTEXT`, D-36). Sin clustering, P5 y P6 se ejecutan: P5 forma lotes de RF
+      (D-39). El detalle de cada etapa está en
       `docs/prompts_fases/Fase 3/pipeline_design.md`.
     - Los endpoints marcados con `x-status: proposed` son extensiones propuestas que aún no
       figuran en el README.
@@ -955,7 +958,9 @@ components:
       enum: [pending, running, completed, failed, skipped]
       description: |
         `skipped`: etapa omitida por una condición del flujo (P3 y P4 con clustering
-        deshabilitado; P3–P7 cuando P2 no extrae requisitos). Si una etapa falla, las
+        deshabilitado; P3–P7 cuando P2 no extrae requisitos; P6–P7 cuando, con clustering
+        activo, ningún RF queda asignado a un cluster, D-36). Sin clustering, P5 y P6 se
+        ejecutan: P5 forma lotes de RF (D-39). Si una etapa falla, las
         posteriores quedan en `pending`, no en `skipped`. `failed` en P7 no hace fallar la
         generación.
     GenerationConfiguration:
@@ -963,7 +968,9 @@ components:
       description: |
         Parámetros de la ejecución. `semantic_clustering_enabled` se persiste en
         `generations.clustering_enabled` y `method_type` en `generations.method_type`; el
-        conjunto completo aplicado queda en `config_snapshot`.
+        conjunto completo aplicado queda en `config_snapshot`. `semantic_clustering_enabled`
+        determina `strategy` en P5 (`by_cluster`/`by_user_story`) y la variante de prompt de P6
+        (`contexto`/`contexto_sin_clustering`, D-38).
       properties:
         semantic_clustering_enabled:
           type: boolean
@@ -1008,6 +1015,7 @@ components:
           description: |
             Configuración efectivamente usada por la etapa (modelo, dimensión de embeddings,
             algoritmo de clustering…). `config_snapshot` guarda lo solicitado; esto, lo ejecutado.
+            En P6 incluye `prompt_variant` y `prompt_version` (D-38).
           additionalProperties: true
         started_at: { type: [string, "null"], format: date-time }
         completed_at: { type: [string, "null"], format: date-time }
@@ -1027,7 +1035,12 @@ components:
       properties:
         provider: { type: string }
         model: { type: string }
-        prompt_version: { type: string }
+        prompt_version:
+          type: string
+          description: |
+            Variante concreta del prompt ejecutado (p. ej. `contexto@p6-v1` o
+            `contexto_sin_clustering@p6-v1`, D-38).
+          examples: ["contexto@p6-v1"]
         input_tokens: { type: [integer, "null"], minimum: 0 }
         output_tokens: { type: [integer, "null"], minimum: 0 }
         attempts: { type: integer, minimum: 1 }

@@ -262,6 +262,31 @@ def generation_context(**overrides: Any) -> p5.GenerationContext:
     return p5.GenerationContext(**{**values, **overrides})
 
 
+def context_unit_without_clustering(**overrides: Any) -> p5.ContextUnit:
+    values: dict[str, Any] = {
+        "unit_id": "U-001",
+        "label": "Lote RF-001",
+        "cluster_label": None,
+        "requirements": (p5.ContextRequirement(code="RF-001", description="Iniciar sesión."),),
+        "context_requirements": (),
+        "user_stories": (p5.ContextUserStory(code="HU-001", original_text=HU1_TEXT, objective="iniciar sesión"),),
+        "requirement_to_stories": {"RF-001": ("HU-001",)},
+        "token_estimate": 350,
+    }
+    return p5.ContextUnit(**{**values, **overrides})
+
+
+def generation_context_without_clustering(**overrides: Any) -> p5.GenerationContext:
+    values: dict[str, Any] = {
+        "generation_id": GENERATION_ID,
+        "output_spec": output_spec(),
+        "instructions_version": "i-v1",
+        "strategy": "by_user_story",
+        "units": (context_unit_without_clustering(),),
+    }
+    return p5.GenerationContext(**{**values, **overrides})
+
+
 def p5_output() -> p5.P5Output:
     return p5.P5Output(context=generation_context())
 
@@ -353,6 +378,7 @@ def all_contracts() -> dict[str, common.ContractModel]:
         "ContextUserStory": context_unit().user_stories[0],
         "ContextUnit": context_unit(),
         "GenerationContext": generation_context(),
+        "GenerationContextWithoutClustering": generation_context_without_clustering(),
         "P5Config": p5_config(),
         "P5Input": p5_input(),
         "P5Output": p5_output(),

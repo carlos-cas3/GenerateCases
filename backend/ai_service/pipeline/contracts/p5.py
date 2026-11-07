@@ -107,27 +107,45 @@ class ContextUnit(ContractModel):
 
 
 class GenerationContext(ContractModel):
-    """Contexto de generación. Lo produce P5; lo consume P6. No se persiste (D-12)."""
+    """Contexto de generación. Lo produce P5; lo consume P6. No se persiste (D-12).
+
+    - `instructions_version`: versión de las instrucciones de P5; no es el prompt de P6 (D-38).
+    - `units`: puede ser vacía solo con `by_cluster` y D-36 (ningún RF asignado a un cluster).
+      Con `by_user_story` (sin clustering: lotes de RF con HU de origen, D-39) hay al menos una
+      unidad y ninguna lleva `cluster_label` ni `context_requirements`.
+    """
 
     generation_id: UUID
     output_spec: TestCaseOutputSpec
     instructions_version: NonEmptyStr
     strategy: UnitStrategy
-    units: tuple[ContextUnit, ...] = Field(min_length=1)  # D-36 pendiente
+    units: tuple[ContextUnit, ...]
 
     @model_validator(mode="after")
     def _single_target(self) -> "GenerationContext":
         ensure_unique((unit.unit_id for unit in self.units), "unit_id")
         ensure_unique((code for unit in self.units for code in unit.target_codes()), "RF objetivo entre unidades")
-        if self.strategy == UnitStrategy.BY_CLUSTER and any(u.cluster_label is None for u in self.units):
-            raise ValueError("con by_cluster toda unidad debe tener cluster_label")
-        if self.strategy == UnitStrategy.BY_USER_STORY and any(u.cluster_label is not None for u in self.units):
-            raise ValueError("con by_user_story ninguna unidad tiene cluster_label")
+
+        if self.strategy == UnitStrategy.BY_CLUSTER:
+            if any(unit.cluster_label is None for unit in self.units):
+                raise ValueError("con by_cluster toda unidad debe tener cluster_label")
+        else:
+            if not self.units:
+                raise ValueError("con by_user_story debe haber al menos una unidad")
+            if any(unit.cluster_label is not None for unit in self.units):
+                raise ValueError("con by_user_story ninguna unidad tiene cluster_label")
+            if any(unit.context_requirements for unit in self.units):
+                raise ValueError("con by_user_story ninguna unidad tiene context_requirements")
+
         return self
 
 
 class P5Config(ContractModel):
-    """Configuración de P5 (servidor, R8)."""
+    """Configuración de P5 (servidor, R8).
+
+    `strategy` se deriva de `semantic_clustering_enabled`: `by_cluster` si `true`,
+    `by_user_story` si `false` (D-39).
+    """
 
     max_tokens_per_unit: int = Field(gt=0)
     strategy: UnitStrategy

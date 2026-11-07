@@ -206,9 +206,19 @@ def test_unit_rejects_unreferenced_stories() -> None:
         f.context_unit(user_stories=f.context_unit().user_stories + (extra,))
 
 
-def test_generation_context_requires_a_unit() -> None:
-    with pytest.raises(ValidationError):
-        f.generation_context(units=())
+def test_generation_context_allows_empty_units_only_with_clustering() -> None:
+    assert f.generation_context(units=()).units == ()
+    with pytest.raises(ValidationError, match="al menos una unidad"):
+        f.generation_context_without_clustering(units=())
+
+
+def test_by_user_story_rejects_context_requirements() -> None:
+    unit = f.context_unit_without_clustering(
+        context_requirements=(p5.ContextRequirement(code="RF-002", description="Bloqueo."),),
+        requirement_to_stories={"RF-001": ("HU-001",), "RF-002": ("HU-001",)},
+    )
+    with pytest.raises(ValidationError, match="context_requirements"):
+        f.generation_context_without_clustering(units=(unit,))
 
 
 def test_by_user_story_units_have_no_cluster() -> None:

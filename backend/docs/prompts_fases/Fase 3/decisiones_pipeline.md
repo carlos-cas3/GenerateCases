@@ -2,7 +2,7 @@
 
 Documento de respuesta a las secciones 2, 3 y 4 de la revisión del diseño (`pipeline_design.md`). Recoge las decisiones tomadas, las recomendaciones propuestas y los cambios que implican en `schema.sql`, `openapi.yaml` y el código.
 
-> **Actualización (cierre documental, 2026-11-04):** las claves de `test_data` (D-26), la lista de métricas de P7 (D-37), D-18 y D-36 quedaron cerradas. Ver `cierre_documental.md`. Donde este documento diga otra cosa, prevalece el cierre.
+> **Actualización (cierre documental, 2026-11-04):** las claves de `test_data` (D-26), la lista de métricas de P7 (D-37), D-18 y D-36 quedaron cerradas. Después se añadieron D-38 (variante de prompt de P6) y D-39 (unidades sin clustering), que corrige el alcance de D-36. Ver `cierre_documental.md`. Donde este documento diga otra cosa, prevalece el cierre.
 
 **Convenciones**
 - **Decidido**: confirmado por el responsable del proyecto.
@@ -25,6 +25,8 @@ Documento de respuesta a las secciones 2, 3 y 4 de la revisión del diseño (`pi
 | D-33 | P7 siempre se ejecuta | Decidido | Calcula y persiste métricas; cambia R1 |
 | D-34 | `config_snapshot` | Recomendado | Fijo al inicio; lo ocurrido en ejecución va por etapa |
 | D-35 | Metadatos de etapa (2.4) | Recomendado | Columnas `warnings`, `llm_runs`, `runtime_info` |
+| D-38 | Variante de prompt de P6 | Decidido | `contexto` con clustering; `contexto_sin_clustering` sin clustering |
+| D-39 | Unidades sin clustering | Decidido | Lotes de RF con HU de origen |
 
 ---
 
@@ -119,6 +121,14 @@ Se expone en `GenerationStage` del openapi como campos opcionales.
 **Por qué A**: es más simple, no necesita una operación de fusión (con riesgo de condiciones de carrera), separa con claridad "lo solicitado" de "lo ejecutado" y reutiliza la columna del punto 2.4.
 
 **Acción**: documentar en el diseño que el snapshot se fija solo al inicio.
+
+### 2.6 Variante de prompt de P6 y unidades sin clustering (D-38, D-39) — Decidido
+
+**D-38.** `P6Config.prompt_version` identifica la familia/versión del prompt. P6 elige la variante según `GenerationContext.strategy`: `by_cluster` → `contexto`; `by_user_story` → `contexto_sin_clustering`. Ambas usan el mismo `TestCaseOutputSpec` y JSON Schema. La variante ejecutada (p. ej. `contexto@p6-v1`) se registra en `LlmRunInfo.prompt_version` y en `runtime_info`; `config_snapshot` guarda solo la familia configurada (D-34).
+
+**D-39.** Sin clustering, P5 no crea una unidad por HU: agrupa los RF en lotes que respetan `max_tokens_per_unit`. Cada unidad lleva los RF objetivo del lote, las HU de origen como contexto y la relación RF→HU; `cluster_label = None` y `context_requirements = ()`. Una HU puede repetirse como contexto en varios lotes, pero cada RF es objetivo en exactamente una unidad. Modifica D-12; el valor `by_user_story` se mantiene con el significado «sin clustering: lotes de RF con HU de origen».
+
+**Corrección de D-36.** `INSUFFICIENT_CONTEXT`, cero unidades y `skip_remaining` aplican **solo** con clustering activo y ningún RF asignado. Sin clustering, P5 produce al menos una unidad o falla con `EMPTY_CONTEXT`.
 
 ---
 

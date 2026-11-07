@@ -10,10 +10,12 @@
 
 | ID | Tema | Decisión | Dónde quedó en `pipeline_design.md` |
 |---|---|---|---|
-| **D-36** | Con clustering, ningún RF queda asignado a un cluster | **Opción (a).** P5 `completed` con aviso `INSUFFICIENT_CONTEXT` y 0 unidades; P6 y P7 `skipped`; generación `completed`. No es un fallo y no se emite `EMPTY_CONTEXT`. El contrato de P5 debe admitir cero unidades. | R3, 1.4.1 (`units`), P4 (pocos RF), P5 (tabla de estados y errores), P6 y P7 (estado), 1.9 |
+| **D-36** | Con clustering, ningún RF queda asignado a un cluster | **Opción (a), solo con clustering (corregido por D-39).** P5 `completed` con aviso `INSUFFICIENT_CONTEXT` y 0 unidades; P6 y P7 `skipped`; generación `completed`. No es un fallo y no se emite `EMPTY_CONTEXT`. El contrato de P5 admite cero unidades solo con `by_cluster`. | R3, 1.4.1 (`units`), P4 (pocos RF), P5 (tabla de estados y errores), P6 y P7 (estado), 1.9 |
 | **D-26** | Estructura de `test_data` | Solo `inputs` y `notes`. `preconditions` y `expected_result` son campos de primer nivel del caso. | 1.3.8, 1.4.2, P6 (invariante 9), 1.9 |
 | **D-37** | Métricas de P7 v1 | `requirement_coverage` (solo `validated`), `proposed_requirement_coverage` (aparte), `story_coverage`, `cases_per_requirement`, `unassigned_ratio` (solo con clustering; sin clustering no se registra la fila). `formula_version = "v1"`. | P7 (tabla de fórmulas), 1.9 |
 | **D-18** | Soporte del vínculo CP–RF | **Diferido.** Se retira `link_support_threshold` de `P6Config`; P6 no calcula score ni anota `validation_notes` en v1. | 1.3.8 (`validation_notes`), P6 (`P6Config`, invariante 6), 1.6.1, 1.9 |
+| **D-38** | Variante de prompt de P6 según clustering | `contexto` con clustering (`by_cluster`); `contexto_sin_clustering` sin clustering (`by_user_story`). `P6Config.prompt_version` es la familia; la variante se resuelve por `context.strategy`. Ambas comparten `TestCaseOutputSpec`. Lo ejecutado se registra en `LlmRunInfo.prompt_version` y `runtime_info`. | 1.4.4 (`LlmRunInfo`), P6 (selección de prompt, `P6Config`), 1.9 |
+| **D-39** | Unidades sin clustering | P5 agrupa los RF en lotes según `max_tokens_per_unit`; cada unidad lleva los RF objetivo del lote y sus HU de origen como contexto; `cluster_label = None`, `context_requirements = ()`. Modifica D-12. Corrige D-36: sin clustering no hay `INSUFFICIENT_CONTEXT`; P5 produce ≥ 1 unidad o falla con `EMPTY_CONTEXT`. | 1.4.1 (`GenerationContext`, `ContextUnit`, invariantes), P5 (comportamiento, errores, D-36), P6 y P7 (estado), 1.9 (D-12, D-36) |
 | — | `StageError` | Se corrige el **diseño**, no el código: `StageError` no lleva `stage_key`; la etapa la aporta el orquestador. | 1.4.4 |
 
 Otras correcciones de documentación hechas en este cierre:
@@ -33,6 +35,15 @@ Otras correcciones de documentación hechas en este cierre:
 | `unassigned_ratio` | RF en `unassigned_requirements` | Total de RF | **Sin clustering no se inserta la fila** (no es 0 ni `null`: la métrica no aplica). |
 
 Recién terminada P6 todos los vínculos son `pending`, así que `requirement_coverage` vale 0 hasta que haya validación. Por eso existe `proposed_requirement_coverage`, que se muestra aparte y no cuenta como cobertura (R7).
+
+### 1.2 Variantes de prompt de P6 (D-38)
+
+| `semantic_clustering_enabled` | `strategy` | Unidad de P5 | Prompt de P6 |
+|---|---|---|---|
+| `true` con RF asignados | `by_cluster` | clúster / subunidad por tokens | `contexto` |
+| `false` | `by_user_story` | lote de RF + HU de origen | `contexto_sin_clustering` |
+| `true` sin ningún RF asignado | `by_cluster` | 0 unidades + `INSUFFICIENT_CONTEXT` (D-36) | `skipped` |
+| `false` y no se puede construir ninguna unidad | `by_user_story` | `EMPTY_CONTEXT` (fallo) | `pending` |
 
 ---
 
@@ -72,7 +83,8 @@ Vienen de la sección "Decisiones que tomé por ambigüedad" de `resultados_pipe
 
 - Supuestos 1–10 de la sección 2: pendientes de revisión del responsable.
 - Supuesto 11: pendiente según D-26.
-- T-01, T-02, T-04 y T-05.
+- D-38 y D-39 quedan cerradas (handoff `actualización_decisiones_incosistencia.md`).
+- T-01, T-02, T-04 y T-05. T-05 sigue abierta y bloquea la implementación real de P5 (loteo de RF) y P6 (uso del prompt resuelto).
 - Recomendaciones de `decisiones_pipeline.md` marcadas como "Recomendado" que siguen sin confirmar.
 
 ---
@@ -83,11 +95,13 @@ No incluido en este cierre. Lista de lo que debe cambiar para alinear el código
 
 | Archivo | Cambio | Decisión |
 |---|---|---|
-| `ai_service/pipeline/contracts/p5.py` | `GenerationContext.units` admite tupla vacía (quitar `min_length=1` y el comentario "D-36 pendiente"). | D-36 |
+| `ai_service/pipeline/contracts/p5.py` | `units` vacía solo con `by_cluster`; `by_user_story` exige ≥ 1 unidad y sin `context_requirements`. **Hecho.** | D-36, D-39 |
 | `ai_service/pipeline/contracts/common.py` | `TestData` solo con `inputs` y `notes`. | D-26 |
+| `ai_service/pipeline/contracts/p6.py` | Documentar `prompt_version` como familia; la variante se resuelve por `strategy`. **Hecho.** | D-38 |
 | `ai_service/pipeline/contracts/p6.py` | Quitar `link_support_threshold` de `P6Config`. | D-18 |
+| `ai_service/pipeline/prompts/` (nuevo) | Resolvedor `contexto` / `contexto_sin_clustering`. **Hecho.** | D-38 |
 | `ai_service/pipeline/contracts/p7.py` (nuevo) | `P7Input` / `P7Output` con las métricas de D-37 y `formula_version`. | D-37 |
-| Orquestador / catálogo | Aviso `INSUFFICIENT_CONTEXT` en P5 y `skipped` de P6–P7 cuando P5 devuelve 0 unidades. | D-36 |
-| `docs/openapi.yaml` | Esquema `TestData` solo con `inputs` y `notes`; documentar `INSUFFICIENT_CONTEXT`; describir las métricas de P7 v1. | D-26, D-36, D-37 |
-| `tests/` | Ajustar factorías y pruebas: cero unidades en P5, `TestData` reducido, sin `link_support_threshold`, contratos de P7 y compatibilidad con el openapi. | Todas |
+| Orquestador / P5 | `INSUFFICIENT_CONTEXT` y `skip_remaining` solo en D-36 (clustering sin RF asignados); sin clustering con 0 unidades → `EMPTY_CONTEXT`. Bloqueado por T-05. | D-36, D-39 |
+| `docs/openapi.yaml` | Documentar D-36, la variante de prompt y el `skipped` sin clustering (**hecho**). Pendiente: esquema `TestData` solo con `inputs` y `notes`; métricas de P7 v1. | D-26, D-36, D-37, D-38 |
+| `tests/` | Pruebas de `units` por estrategia y del resolvedor de prompts (**hecho**). Pendiente: `TestData` reducido, sin `link_support_threshold`, contratos de P7 y compatibilidad con el openapi. | Todas |
 | `supabase/schema.sql` | Según lo que se decida en T-01, T-02 y T-04. | T-01, T-02, T-04 |

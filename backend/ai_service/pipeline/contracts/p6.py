@@ -161,7 +161,11 @@ class UnitFailure(ContractModel):
 
 
 class P6Config(ContractModel):
-    """Configuración de P6 (servidor, R8). `on_unit_failure`: D-15 solo admite detener la etapa."""
+    """Configuración de P6 (servidor, R8). `on_unit_failure`: D-15 solo admite detener la etapa.
+
+    `prompt_version` identifica la familia/versión. P6 resuelve la variante
+    (`contexto`/`contexto_sin_clustering`) con `context.strategy` (D-38).
+    """
 
     prompt_version: NonEmptyStr
     llm: LlmSettings

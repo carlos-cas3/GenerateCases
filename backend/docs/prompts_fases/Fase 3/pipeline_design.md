@@ -1,8 +1,8 @@
 # Diseño técnico del pipeline
 
-> **Estado:** borrador. Contiene únicamente la **Sección 1: modelos y contratos de entrada/salida**.\
+> **Estado:** borrador en revisión documental. Contiene únicamente la **Sección 1: modelos y contratos de entrada/salida**.\
 > **Alcance:** etapas P1–P7. P7 (evaluación) se ejecuta cuando hay casos de prueba y no es bloqueante (D-33); sus métricas v1 están en D-37 y su contrato en código está pendiente.\
-> **Revisión:** incorpora las decisiones D-26 a D-35 de `decisiones_pipeline.md` y el cierre documental (D-18, D-26, D-36, D-37 y las tareas T-01 a T-04) de `cierre_documental.md`.
+> **Revisión:** incorpora las decisiones D-26 a D-35 de `decisiones_pipeline.md` y el cierre documental (D-18, D-26, D-36, D-37, D-38, D-39 y las tareas T-01 a T-05) de `cierre_documental.md`.
 
 ---
 
@@ -274,7 +274,7 @@ Se persiste en `test_cases`, `test_steps` y `requirement_test_cases`.
 
 #### 1.4.1 `GenerationContext` y `ContextUnit`
 
-El `GenerationContext` es el contenedor de una generación y está formado por **unidades funcionales independientes**. Con clustering habilitado, cada unidad corresponde a un clúster (o a una subunidad de ese clúster si debe dividirse para respetar el límite de tokens); sin clustering, las unidades se construyen por HU y pueden dividirse en lotes. P6 procesa cada unidad mediante una solicitud independiente al LLM. Los resultados se reúnen bajo la misma `generation_id`; no se acumula un único contexto global de todos los grupos.
+El `GenerationContext` es el contenedor de una generación y está formado por **unidades funcionales independientes**. Con clustering habilitado, cada unidad corresponde a un clúster (o a una subunidad de ese clúster si debe dividirse para respetar el límite de tokens); sin clustering, las unidades se construyen agrupando RF en lotes que respetan el límite de tokens; las HU de origen acompañan como contexto (D-39). P6 procesa cada unidad mediante una solicitud independiente al LLM. Los resultados se reúnen bajo la misma `generation_id`; no se acumula un único contexto global de todos los grupos.
 
 `GenerationContext`
 
@@ -282,19 +282,19 @@ El `GenerationContext` es el contenedor de una generación y está formado por *
 |---|---|---|
 | `generation_id` | UUID | |
 | `output_spec` | `TestCaseOutputSpec` | Estructura esperada del caso de prueba (común a todas las unidades). |
-| `instructions_version` | str | Versión del prompt/instrucciones de generación. |
-| `strategy` | str | `by_cluster` o `by_user_story`; una unidad puede subdividirse por límite de tokens. **[Resuelta D-12]** |
-| `units` | tuple[`ContextUnit`] | Puede ser vacía solo en el caso D-36 (clustering sin ningún RF asignado). En cualquier otro caso, mínimo 1. |
+| `instructions_version` | str | Versión de las instrucciones de P5 (construcción de contexto). No es la variante de prompt de P6 (D-38). |
+| `strategy` | str | `by_cluster` o `by_user_story`. `by_user_story` significa «sin clustering: lotes de RF con HU de origen» (D-39). Una unidad puede subdividirse por límite de tokens. **[Resuelta D-12, modificada por D-39]** |
+| `units` | tuple[`ContextUnit`] | Puede ser vacía solo con `by_cluster` y D-36 (clustering sin ningún RF asignado). Con `by_user_story`, mínimo 1. |
 
 `ContextUnit`
 
 | Campo | Tipo | Notas |
 |---|---|---|
 | `unit_id` | str | Identificador estable dentro de la generación, por ejemplo `U-001`. |
-| `label` | str | Nombre del clúster, HU o subunidad. |
+| `label` | str | Nombre del clúster, lote de RF o subunidad. |
 | `cluster_label` | int \| None | `None` si la unidad no proviene de un clúster. En subunidades se conserva el clúster de origen. |
 | `requirements` | tuple[`ContextRequirement`] | RF **objetivo** de la unidad (`code`, `description`). Mínimo 1. |
-| `context_requirements` | tuple[`ContextRequirement`] | RF de **contexto**: pertenecen al cluster de la unidad pero son objetivo en otro (D-31). No pueden enlazarse desde los casos generados. Puede ser vacía. |
+| `context_requirements` | tuple[`ContextRequirement`] | RF de **contexto**: pertenecen al cluster de la unidad pero son objetivo en otro (D-31). No pueden enlazarse desde los casos generados. Puede ser vacía. En `by_user_story` siempre es vacía (D-39). |
 | `user_stories` | tuple[`ContextUserStory`] | Referencias y contenido relevante de las HU de origen, incluidos fragmentos enriquecidos que aporten contexto a la generación. Cada HU aparece una sola vez por unidad. |
 | `requirement_to_stories` | mapping[str, tuple[str]] | Relaciones RF→HU por código, sin repetir texto. |
 | `prerequisites` | tuple[`ContextRequirement`] | **Solo contexto:** RF prerrequisito que no pertenecen a la unidad. No pueden enlazarse desde los casos generados. Opcional. **[Pendiente D-17]** |
@@ -305,7 +305,7 @@ El `GenerationContext` es el contenedor de una generación y está formado por *
 
 **Invariantes**
 
-- Todo RF **objetivo** aparece como objetivo en **exactamente una** unidad. Con clustering, son objetivo los RF asignados a algún cluster; los de `unassigned_requirement_codes` no entran en ninguna unidad (D-32). Sin clustering, todos los RF son objetivo.
+- Todo RF **objetivo** aparece como objetivo en **exactamente una** unidad. Con clustering, son objetivo los RF asignados a algún cluster; los de `unassigned_requirement_codes` no entran en ninguna unidad (D-32). Sin clustering, todos los RF son objetivo y se reparten en lotes; cada RF aparece como objetivo en una sola unidad (D-39).
 - Los textos de HU y RF no se duplican dentro de una unidad: se referencian por código.
 - Una unidad contiene solo los RF/HU relevantes para ella.
 
@@ -355,7 +355,7 @@ Sobres de la respuesta cruda del LLM (se validan con `model_validate_json()` ant
 
 En código, la etapa devuelve un `StageResult` (`warnings`, `llm_runs`, `runtime_info`, `skip_remaining`) y el orquestador lo persiste al completar la etapa. `skip_remaining=True` marca `skipped` todas las etapas posteriores (D-29).
 
-`LlmRunInfo`: `provider`, `model`, `prompt_version`, `input_tokens`, `output_tokens`, `attempts`, `latency_ms`, `unit_id | None`.
+`LlmRunInfo`: `provider`, `model`, `prompt_version`, `input_tokens`, `output_tokens`, `attempts`, `latency_ms`, `unit_id | None`. `prompt_version` es la variante concreta ejecutada (p. ej. `contexto@p6-v1`, D-38).
 
 `StageError` (se refleja en `generation_stages.error_code` y `generation_stages.error_message`, D-28). Cualquier otra excepción se registra con `error_code=INTERNAL_ERROR` y un mensaje genérico. `StageError` **no** lleva la etapa: la aporta el orquestador, que sabe qué etapa está ejecutando y escribe el error en la fila de `generation_stages` correspondiente.
 
@@ -635,14 +635,14 @@ En v1, la clasificación se realiza mediante LLM. El contrato `StoryClassificati
 - Con `clustering`: P5 crea una unidad por clúster. Los RF sin grupo **no** forman unidad y no generan CP por ahora (D-32); siguen guardados y visibles.
 - **RF en varios clusters (D-31):** el RF es objetivo solo en el cluster con mayor `similarity_to_centroid`; en los demás entra como contexto adicional. Desempate (misma similitud o sin valor): el cluster con menor `label`.
 - Si una unidad excede `max_tokens_per_unit`, P5 la divide en subunidades del mismo clúster, procurando no separar RF que compartan HU cuando sea viable. Cada RF tiene una única unidad objetivo de generación; los RF/HU relacionados que no sean objetivo pueden incluirse como contexto sin convertirse en objetivos duplicados. Se conserva la pertenencia al clúster de origen.
-- Sin `clustering`: P5 construye unidades por HU y las subdivide en lotes cuando sea necesario para respetar el límite de tokens.
+- Sin `clustering` (D-39): P5 agrupa los RF en lotes que respetan `max_tokens_per_unit`; cada unidad incluye los RF objetivo del lote y las HU de origen como contexto. No hay `cluster_label` ni `context_requirements` de clúster. Las HU pueden repetirse como contexto si sus RF caen en lotes distintos.
 - Si una unidad mínima no cabe en el límite, se conserva con `exceeds_limit=True` y se registra advertencia. P6 la trata como error de unidad (sin enviar una solicitud que exceda deliberadamente el límite).
 
 **Invariantes:** completitud de RF en unidades; sin texto duplicado; referencias por código resolubles.
 
-**Errores:** `EMPTY_CONTEXT` (solo si hay RF objetivo y aun así no se puede construir ninguna unidad; no aplica con cero RF, D-29, ni con cero RF asignados, D-36), `UNRESOLVED_REFERENCE`, `TOKEN_LIMIT_UNSATISFIABLE`.
+**Errores:** `EMPTY_CONTEXT` (sin clustering, o con clustering y RF asignados, cuando hay RF objetivo y aun así no se puede construir ninguna unidad; no aplica con cero RF, D-29, ni con cero RF asignados, D-36), `UNRESOLVED_REFERENCE`, `TOKEN_LIMIT_UNSATISFIABLE`.
 
-**Ningún RF asignado a un cluster (D-36, resuelta con la opción a):** con clustering, si P4 deja todos los RF en `unassigned_requirement_codes`, no hay RF objetivo. **No es un fallo:**
+**Ningún RF asignado a un cluster (D-36, resuelta con la opción a):** con clustering, si P4 deja todos los RF en `unassigned_requirement_codes`, no hay RF objetivo. Aplica **solo con clustering**. Sin clustering no se emite `INSUFFICIENT_CONTEXT`: P5 produce al menos una unidad o falla con `EMPTY_CONTEXT`. **No es un fallo:**
 
 | Etapa | Estado |
 |---|---|
@@ -651,14 +651,21 @@ En v1, la clasificación se realiza mediante LLM. El contrato `StoryClassificati
 | P6 – P7 | `skipped` |
 | Generación | `completed` |
 
-Los RF siguen guardados en `unassigned_requirements` y visibles en la API (D-32). El contrato de P5 debe admitir cero unidades en este caso (cambio de contratos posterior, ver `cierre_documental.md`).
+Los RF siguen guardados en `unassigned_requirements` y visibles en la API (D-32). El contrato de P5 admite cero unidades solo con `by_cluster`; con `by_user_story` exige al menos una (ver `cierre_documental.md`).
 
 #### P6. Generación de casos de prueba funcionales (LLM)
 
 | | |
 |---|---|
-| **Estado** | Se ejecuta si P5 produjo al menos una unidad; `skipped` con cero RF (D-29) o cero unidades (D-36). |
+| **Estado** | Se ejecuta si P5 produjo al menos una unidad; `skipped` con cero RF (D-29) o cero unidades **solo por D-36**. |
 | **Puerto** | `TestCaseGenerator`. |
+
+**Selección de prompt (D-38).** `P6Config.prompt_version` identifica la familia/versión. P6 resuelve la variante con `context.strategy`:
+
+- `by_cluster` → `contexto`
+- `by_user_story` → `contexto_sin_clustering`
+
+Ambas comparten `TestCaseOutputSpec`. La variante ejecutada se registra en `LlmRunInfo.prompt_version` (p. ej. `contexto@p6-v1`) y en `runtime_info`. El resolvedor está en `ai_service/pipeline/prompts/p6.py`.
 
 **`P6Input`**
 
@@ -666,7 +673,7 @@ Los RF siguen guardados en `unassigned_requirements` y visibles en la API (D-32)
 |---|---|---|
 | `generation_id` | UUID | sí |
 | `context` | `GenerationContext` | sí |
-| `config` | `P6Config` (`prompt_version`, `llm`, `max_retries`, `on_unit_failure`) | sí |
+| `config` | `P6Config` (`prompt_version` (familia; la variante se resuelve por `context.strategy`), `llm`, `max_retries`, `on_unit_failure`) | sí |
 
 **`P6Output`**
 
@@ -689,7 +696,7 @@ Los RF siguen guardados en `unassigned_requirements` y visibles en la API (D-32)
 8. Los `requirement_codes` repetidos en un mismo caso se eliminan antes de persistir (la PK de `requirement_test_cases` los rechazaría). `persist_p6_unit` también los elimina.
 9. `test_data` debe cumplir `TestData` (solo `inputs` y `notes`, D-26); si no, la respuesta es `LLM_INVALID_OUTPUT` y se reintenta.
 
-**Errores:** `LLM_UNAVAILABLE`, `LLM_INVALID_OUTPUT`, `UNIT_GENERATION_FAILED`, `NO_TEST_CASES_GENERATED` (solo cuando hay unidades y no se genera ningún CP; con cero RF o cero unidades P6 está `skipped`, D-29 y D-36).
+**Errores:** `LLM_UNAVAILABLE`, `LLM_INVALID_OUTPUT`, `UNIT_GENERATION_FAILED`, `NO_TEST_CASES_GENERATED` (solo cuando hay unidades y no se genera ningún CP; con cero RF o cero unidades **solo por D-36** P6 está `skipped`, D-29 y D-36).
 
 **Ejecución y persistencia incremental (D-15 resuelta):** P6 procesa las unidades secuencialmente en v1. Cada unidad completada persiste sus casos de prueba y vínculos de forma atómica mediante `persist_p6_unit`: se guardan todos los artefactos de esa unidad o ninguno. Si una unidad falla, se reintenta hasta `max_retries`; si el fallo persiste, P6 termina y la generación global queda `failed`. Las unidades completadas antes del fallo y sus resultados persistidos se conservan. Se registra `unit_id`, código de error y mensaje apto para consulta; los detalles internos sensibles quedan en logs. No se implementa reanudación automática en v1. `P6Output.failed_units` describe la unidad fallida si el contrato devuelve un resultado de etapa; el estado terminal de la etapa sigue siendo fallido.
 
@@ -697,7 +704,7 @@ Los RF siguen guardados en `unassigned_requirements` y visibles en la API (D-32)
 
 | | |
 |---|---|
-| **Estado** | Se ejecuta cuando P6 se ejecutó; `skipped` si P2 no extrajo RF (D-29) o si P5 no produjo unidades (D-36). |
+| **Estado** | Se ejecuta cuando P6 se ejecutó; `skipped` si P2 no extrajo RF (D-29) o si P5 no produjo unidades **solo por D-36**. |
 | **Bloqueante** | **No** (D-33): si falla, queda `failed` con su `error_code` y la generación termina `completed`. |
 | **Responsabilidad** | Calcular métricas y guardarlas en `generation_metrics` (y sus hallazgos en `metric_findings`). Es la única etapa que escribe ahí. |
 
@@ -840,7 +847,7 @@ Todo el recorrido se resuelve por `code` dentro de una misma `generation_id`. No
 | **D-09** | Persistencia de embeddings | Memoria; columna `vector`/pgvector; almacén externo | Memoria entre P3 y P4; solo metadatos del modelo en `config_snapshot`. Sin reanudación en v1. |
 | **D-10** | Nombre/descripción de cada cluster (`name` es NOT NULL) | Determinista (`Grupo {label}`) o generado por LLM | Determinista en v1, para no añadir otra llamada al LLM. |
 | **D-11** | RF no asignados (*outliers*) | Unidad propia en P5; descartarlos; forzar asignación | **Reemplazada por D-32.** |
-| **D-12** | Estrategia de unidades de generación y contexto de P5 | Contexto global único; unidades por clúster/HU; persistir el contexto | **Resuelta.** Con clustering: unidad por clúster, dividida en subunidades si excede el límite. Sin clustering: unidades por HU, también divisibles. Cada unidad tiene una solicitud independiente a P6. Contexto derivado no persistido; resultados de P6 sí se persisten incrementalmente. |
+| **D-12** | Estrategia de unidades de generación y contexto de P5 | Contexto global único; unidades por clúster/HU; persistir el contexto | **Resuelta, modificada por D-39.** Con clustering: unidad por clúster, dividida en subunidades si excede el límite. Sin clustering: unidades por lotes de RF con HU de origen como contexto (D-39). Cada unidad tiene una solicitud independiente a P6. Contexto derivado no persistido; resultados de P6 sí se persisten incrementalmente. |
 | **D-13** | Campos extra del caso de prueba (prioridad, tipo, etiquetas) | Migración, o dentro de `test_data` | v1 alineado al esquema actual; ampliar después con migración. |
 | **D-14** | Validación de vínculos RF–CP | P6 deja `pending` y un paso determinista rechaza códigos inexistentes | **Resuelta para v1.** La estructura de `test_data` se trata aparte en D-26. P6 valida la estructura del borrador y que los códigos RF existan y pertenezcan a los RF objetivo de la unidad. Los vínculos persistidos salen `pending`, sin `validation_method`; la validación semántica/real queda para revisión manual o una futura P7. Solo `validated` cuenta como cobertura (R7). |
 | **D-15** | Fallo de una unidad de P6 y conservación de resultados previos | Fallar etapa y descartar resultados; continuar con otras unidades; persistencia incremental | **Resuelta.** Procesar secuencialmente en v1; reintentar la unidad según `max_retries`; si persiste, detener P6 y marcar la generación `failed`. Conservar las unidades ya completadas. Persistencia atómica por unidad (todo o nada), registrar causa del fallo y no reanudar automáticamente en v1. |
@@ -864,8 +871,10 @@ Todo el recorrido se resuelve por `code` dentro de una misma `generation_id`. No
 | **D-33** | P7 | Siempre `skipped`; siempre se ejecuta | **Resuelta.** Siempre se ejecuta (salvo D-29 y D-36), calcula métricas (D-37) y no es bloqueante. Modifica R1. |
 | **D-34** | `config_snapshot` | Fijo al inicio; fusionar durante la ejecución | **Resuelta.** Fijo al inicio (lo solicitado); lo ejecutado va a `generation_stages.runtime_info`. |
 | **D-35** | Metadatos de etapa | Solo logs; columnas en `generation_stages` | **Resuelta.** Columnas `warnings`, `llm_runs`, `runtime_info`, expuestas en `GenerationStage`. |
-| **D-36** | Con clustering, ningún RF queda asignado a un cluster | (a) P5/P6 `completed` con 0 unidades y aviso; (b) volver a unidades por HU para esa generación; (c) fallar con `EMPTY_CONTEXT` | **Resuelta: (a).** P5 `completed` con aviso `INSUFFICIENT_CONTEXT` y 0 unidades; P6 y P7 `skipped`; generación `completed`. No es un fallo y no se emite `EMPTY_CONTEXT`. El contrato de P5 admite cero unidades en este caso. |
+| **D-36** | Con clustering, ningún RF queda asignado a un cluster | (a) P5/P6 `completed` con 0 unidades y aviso; (b) volver a unidades por HU para esa generación; (c) fallar con `EMPTY_CONTEXT` | **Resuelta: (a), solo con clustering.** P5 `completed` con aviso `INSUFFICIENT_CONTEXT` y 0 unidades; P6 y P7 `skipped`; generación `completed`. No es un fallo y no se emite `EMPTY_CONTEXT`. El contrato de P5 admite cero unidades en este caso. |
 | **D-37** | Métricas de P7 v1 | Lista sugerida; ampliada | **Resuelta.** `requirement_coverage` (solo `validated`), `proposed_requirement_coverage` (aparte), `story_coverage`, `cases_per_requirement` y `unassigned_ratio` (solo con clustering; sin clustering no se registra). `formula_version = "v1"`. Fórmulas en P7. |
+| **D-38** | Variante de prompt de P6 según clustering | Una sola instrucción; dos variantes | **Resuelta.** `contexto` con clustering; `contexto_sin_clustering` sin clustering. Se resuelve por `context.strategy`; mismo `TestCaseOutputSpec`; se registra en `LlmRunInfo`/`runtime_info`. |
+| **D-39** | Unidades sin clustering | Por HU; lotes de RF; una por RF | **Resuelta.** Sin clustering, P5 agrupa RF en lotes por tokens; cada unidad lleva RF objetivo + HU de origen; `cluster_label=None`, `context_requirements=()`. Modifica D-12. |
 
 ---
 
