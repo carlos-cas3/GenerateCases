@@ -9,12 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ai_service.api.errors import register_exception_handlers
 from ai_service.api.routes import documents, generations, health
-from ai_service.clients.storage import DocumentStorage
+from ai_service.clients.storage import DocumentStorage  # puerto
 from ai_service.config import Settings, get_settings
 from ai_service.core.logging import configure_logging
 from ai_service.pipeline.stages import build_stub_stages
-from ai_service.repositories.documents import DocumentsRepository
-from ai_service.repositories.generations import GenerationsRepository
+from ai_service.repositories.documents import DocumentsRepository  # puerto
+from ai_service.repositories.generations import GenerationsRepository  # puerto
 from ai_service.services.documents import DocumentsService
 from ai_service.services.generations import GenerationsService
 from ai_service.services.pipeline_runs import PipelineRunService, recover_interrupted_generations
@@ -41,10 +41,10 @@ def create_app(
         documents_repo = documents_repository
         storage = documents_storage
         if generations_repo is None or documents_repo is None or storage is None:
-            from ai_service.clients.storage import SupabaseDocumentStorage
             from ai_service.clients.supabase import create_supabase_client
-            from ai_service.repositories.documents import SupabaseDocumentsRepository
-            from ai_service.repositories.generations import SupabaseGenerationsRepository
+            from ai_service.clients.supabase_storage import SupabaseDocumentStorage  # adaptador
+            from ai_service.repositories.supabase_documents import SupabaseDocumentsRepository  # adaptador
+            from ai_service.repositories.supabase_generations import SupabaseGenerationsRepository  # adaptador
 
             client = create_supabase_client(app_settings)
             generations_repo = generations_repo or SupabaseGenerationsRepository(client)
