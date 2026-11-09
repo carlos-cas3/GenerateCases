@@ -19,8 +19,9 @@
 > La intención y estructura de este documento es consistente con `llm_client_design.md`:
 > ambos definen un puerto, adaptadores intercambiables, una factory y un fake determinista.
 >
-> **Estado:** pendiente de implementación. Las decisiones aquí registradas
-> están tomadas y no requieren nueva aprobación antes de implementar.
+> **Estado:** implementado (puertos, errores, fakes, adaptadores local/OpenAI/HDBSCAN,
+> factories, `Settings`, `create_app` y `architecture_patterns.md`). P-1…P-7 resueltos.
+> Ver "Notas de implementación" al final para los ajustes respecto a esta propuesta.
 
 ---
 
@@ -612,3 +613,33 @@ que ya referencia `clients/llm_fake.py`.
 - Resolver configuración de `min_cluster_size` y `min_samples` de HDBSCAN en `P4Config`
 - Decidir si `embeddings_api_key` reutiliza `llm_api_key` cuando el proveedor es OpenAI
   en ambos, o si tiene su propia variable independiente
+
+---
+
+## Notas de implementación
+
+Ajustes hechos al implementar, respecto a la propuesta:
+
+- **P-8 — Código de `ClusteringError`.** Se usa `CLUSTERING_FAILED` en lugar de
+  `CLUSTERING_ERROR`: es el código que ya fija el catálogo de errores de P4 en
+  `pipeline_design.md`, y P4 lo persistirá como `error_code` de la etapa.
+- **`input_template`.** P3 aplica la plantilla al construir `texts`; los adaptadores
+  no la reinterpretan. Viaja en la solicitud solo para reproducibilidad.
+- **Adaptador local.** Recibe el modelo ya cargado y su nombre. Si
+  `EmbeddingsRequest.model` no coincide con el modelo cargado, lanza `EmbeddingsError`
+  en lugar de devolver vectores de otro modelo en silencio.
+- **Adaptador OpenAI.** `extra["batch_size"]` trocea la solicitud (máx. 2048 entradas
+  por llamada); el resto de `extra` se pasa a la API. Si se pide `dimensions`, es la
+  dimensión esperada. Con `normalize=True` se renormaliza L2 en el cliente.
+- **HDBSCAN.** Con `metric="cosine"` se fija `algorithm="generic"` si no viene en
+  `params` (los árboles KD/Ball de hdbscan no admiten coseno). Los parámetros efectivos
+  se toman de `estimator.get_params()` y se filtran a valores serializables a JSON.
+- **Validación de vectores.** `validate_vectors()` vive en el puerto (solo stdlib) y la
+  comparten los dos adaptadores; pone el contexto en `details` (P-5).
+- **Cierre en `main.py`.** Los clientes que construyen las factories se registran en un
+  `AsyncExitStack`, así que se cierran también si el arranque falla a mitad (R-FA-7).
+- **`EMBEDDINGS_API_KEY`.** Variable propia e independiente de `LLM_API_KEY` (cierra el
+  pendiente de Fase 5 sobre reutilizarla).
+- **Dependencias.** `sentence-transformers` (instala torch) se declara en
+  `requirements.txt`, pero los tests no la necesitan: el adaptador local se prueba con un
+  modelo falso inyectado.

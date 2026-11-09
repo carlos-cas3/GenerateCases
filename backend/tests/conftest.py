@@ -8,6 +8,8 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
+from ai_service.clients.clustering_fake import FakeClusteringClient
+from ai_service.clients.embeddings_fake import FakeEmbeddingsClient
 from ai_service.clients.extractor_fake import FakeDocumentExtractor
 from ai_service.clients.llm_fake import FakeLlmClient
 from ai_service.config import Settings
@@ -64,6 +66,8 @@ def client_factory(store: InMemoryStore, storage: FakeDocumentStorage) -> Iterat
             documents_repository=InMemoryDocumentsRepository(store),
             documents_storage=storage,
             llm_client=FakeLlmClient(),
+            embeddings_client=FakeEmbeddingsClient(),
+            clustering_client=FakeClusteringClient(),
             extractor=FakeDocumentExtractor(),
         )
         client = TestClient(app, raise_server_exceptions=raise_server_exceptions)

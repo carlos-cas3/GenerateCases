@@ -151,6 +151,8 @@ def test_injected_extractor_is_exposed(client: Any) -> None:
 def test_default_extractor_handles_the_three_formats(store: Any) -> None:
     from fastapi.testclient import TestClient
 
+    from ai_service.clients.clustering_fake import FakeClusteringClient
+    from ai_service.clients.embeddings_fake import FakeEmbeddingsClient
     from ai_service.clients.llm_fake import FakeLlmClient
 
     app = create_app(
@@ -159,6 +161,8 @@ def test_default_extractor_handles_the_three_formats(store: Any) -> None:
         documents_repository=InMemoryDocumentsRepository(store),
         documents_storage=FakeDocumentStorage(),
         llm_client=FakeLlmClient(),
+        embeddings_client=FakeEmbeddingsClient(),
+        clustering_client=FakeClusteringClient(),
     )
     with TestClient(app):
         extractor = app.state.extractor

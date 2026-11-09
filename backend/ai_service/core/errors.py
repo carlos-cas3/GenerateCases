@@ -83,6 +83,37 @@ class LlmContextLengthError(LlmError):
     default_message = "El prompt supera el límite de contexto del modelo."
 
 
+class EmbeddingsError(AppError):
+    """Fallo en la generación de embeddings. Los adaptadores lo lanzan; P3 lo captura."""
+
+    code = "EMBEDDING_PROVIDER_UNAVAILABLE"
+    default_message = "Falló la generación de embeddings."
+
+
+class EmbeddingsDimensionError(EmbeddingsError):
+    """Los vectores devueltos tienen una dimensión distinta a la esperada."""
+
+    code = "EMBEDDING_DIMENSION_MISMATCH"
+    default_message = "Los vectores devueltos tienen una dimensión inesperada."
+
+
+class EmbeddingsInvalidVectorError(EmbeddingsError):
+    """Un vector contiene NaN o valores infinitos."""
+
+    code = "EMBEDDING_INVALID_VECTOR"
+    default_message = "El proveedor devolvió un vector con valores no válidos."
+
+
+class ClusteringError(AppError):
+    """Fallo en el clustering. Los adaptadores lo lanzan; P4 lo captura.
+
+    Código alineado con el catálogo de errores de P4 (`pipeline_design.md`).
+    """
+
+    code = "CLUSTERING_FAILED"
+    default_message = "Falló el algoritmo de clustering."
+
+
 class StoredDocumentUnavailable(AppError):
     """No se pudo leer el archivo desde Storage. Lo lanza el adaptador; P1 lo captura."""
 

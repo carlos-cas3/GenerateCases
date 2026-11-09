@@ -429,6 +429,14 @@ Requisitos del cliente LLM (se construye al arrancar; si falta una variable obli
 - `LLM_BASE_URL`: obligatoria para `ollama` (p. ej. `http://localhost:11434`); opcional como proxy para los demás.
 - `LLM_TIMEOUT_SECONDS` (por defecto 60). Detalle en `docs/llm_client_design.md`.
 
+Requisitos de embeddings (P3) y clustering (P4) (se construyen al arrancar, igual que el LLM):
+
+- `EMBEDDINGS_PROVIDER`: `local` (por defecto, `sentence-transformers`; instala torch y descarga el modelo la primera vez) u `openai`.
+- `EMBEDDINGS_MODEL` (por defecto `all-mpnet-base-v2`).
+- `EMBEDDINGS_API_KEY`: obligatoria para `openai`.
+- `EMBEDDINGS_TIMEOUT_SECONDS` (por defecto 60, solo proveedores remotos).
+- `CLUSTERING_ALGORITHM`: `hdbscan` (único valor en v1). Detalle en `docs/prompts_fases/Fase 3/issue_resolver_embeddings.md`.
+
 El comando de instalación debe ajustarse al archivo de dependencias real del repositorio. Si la aplicación expone `app` en `ai_service/main.py`, también puede iniciarse con:
 
 ```bash

@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 StageKeyLiteral = Literal["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
 LlmProviderLiteral = Literal["openai", "anthropic", "ollama"]
+EmbeddingsProviderLiteral = Literal["local", "openai"]
+ClusteringAlgorithmLiteral = Literal["hdbscan"]
 
 
 class Settings(BaseSettings):
@@ -39,6 +41,14 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None  # obligatoria para ollama; opcional (proxy) para el resto
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
 
+    # Embeddings de P3 y clustering de P4 (ver issue_resolver_embeddings.md). La coherencia
+    # proveedor ↔ credenciales la comprueba `EmbeddingsClientFactory` en el arranque.
+    embeddings_provider: EmbeddingsProviderLiteral = "local"
+    embeddings_model: str = Field(default="all-mpnet-base-v2", min_length=1)
+    embeddings_api_key: SecretStr | None = None  # obligatoria para openai
+    embeddings_timeout_seconds: float = Field(default=60.0, gt=0)  # solo proveedores remotos
+    clustering_algorithm: ClusteringAlgorithmLiteral = "hdbscan"
+
     @field_validator("pipeline_stub_fail_at_stage", "llm_base_url", mode="before")
     @classmethod
     def _empty_as_none(cls, value: object) -> object:
@@ -47,10 +57,10 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("llm_api_key", mode="before")
+    @field_validator("llm_api_key", "embeddings_api_key", mode="before")
     @classmethod
     def _empty_secret_as_none(cls, value: object) -> object:
-        """`LLM_API_KEY=` vacía en `.env` equivale a no tener clave."""
+        """`LLM_API_KEY=` o `EMBEDDINGS_API_KEY=` vacías en `.env` equivalen a no tener clave."""
         if isinstance(value, str) and not value.strip():
             return None
         return value

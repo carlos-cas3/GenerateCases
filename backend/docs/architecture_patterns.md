@@ -141,14 +141,16 @@ Los tests usan `InMemoryGenerationsRepository`, `InMemoryDocumentsRepository`,
 `FakeDocumentStorage` y `FakeLlmClient` (`clients/llm_fake.py`). No parchean
 clientes de Supabase ni SDKs de LLM con `unittest.mock`; los adaptadores LLM se
 prueban con `httpx.MockTransport`. El extractor tiene `FakeDocumentExtractor`
-(`clients/extractor_fake.py`). Cuando se añada `EmbeddingsClient`, su fake
-debe vivir en `tests/` o en un módulo `*_fake.py` al lado del puerto.
+(`clients/extractor_fake.py`); embeddings y clustering, `FakeEmbeddingsClient`
+(`clients/embeddings_fake.py`) y `FakeClusteringClient` (`clients/clustering_fake.py`).
+Todo fake nuevo vive en `tests/` o en un módulo `*_fake.py` al lado del puerto.
 
 **R-DI-4 — `create_app()` acepta inyección externa.**  
 La firma de `create_app()` debe mantener los parámetros opcionales de
 repositorios, storage y `llm_client` para que los tests puedan inyectar fakes
-sin Supabase ni proveedor LLM. Al añadir nuevos puertos (embeddings), se añaden
-como parámetros opcionales con el mismo patrón.
+sin Supabase ni proveedor LLM. Lo mismo para `embeddings_client`,
+`clustering_client` y `extractor`; los puertos nuevos se añaden como parámetros
+opcionales con el mismo patrón, al final de la firma.
 
 **R-DI-5 — Los imports de adaptadores en `main.py` son lazy.**  
 Los adaptadores Supabase se importan dentro del bloque `if` del `lifespan`,
@@ -180,12 +182,12 @@ contrato para una tecnología concreta).
 | `ProgressReporter` | `pipeline/events.py` | `RepositoryProgressReporter` |
 | `LlmClient` | `clients/llm.py` | `OpenAILlmClient`, `AnthropicLlmClient`, `OllamaLlmClient` (construidos por `LlmClientFactory`), `FakeLlmClient` |
 | `DocumentTextExtractor` | `clients/extractor.py` | `TxtDocumentExtractor`, `PdfDocumentExtractor`, `DocxDocumentExtractor` (repartidos por `CompositeDocumentExtractor` según `FileType`, sin factory), `FakeDocumentExtractor` |
+| `EmbeddingsClient` | `clients/embeddings.py` | `LocalEmbeddingsClient`, `OpenAIEmbeddingsClient` (construidos por `EmbeddingsClientFactory`), `FakeEmbeddingsClient` |
+| `ClusteringClient` | `clients/clustering.py` | `HDBSCANClusteringClient` (construido por `ClusteringClientFactory`), `FakeClusteringClient` |
 
-### Puertos pendientes (Fase 4)
-
-| Puerto | Módulo previsto | Usado por |
-|---|---|---|
-| `EmbeddingsClient` | `clients/embeddings.py` | P3 |
+Los puertos ya existen; las etapas que los consumen (P1 extractor; P3 embeddings; P4
+clustering) siguen siendo stubs hasta Fase 4/5. `main.py` deja los clientes en
+`app.state` para inyectarlos al construir `build_real_stages`.
 
 ### Reglas
 
@@ -239,6 +241,8 @@ Solo `main.py` los importa, y de forma lazy dentro del `lifespan`.
 - Adaptador de tests: `InMemoryXRepository`, `FakeXStorage`, `FakeXClient` → en módulo `in_memory.py` o `x_fake.py`
 - Adaptador de proveedor LLM: `{Proveedor}LlmClient` → en módulo `{proveedor}_llm.py`
 - Adaptador de extracción por formato: `{Formato}DocumentExtractor` → en módulo `{formato}_extractor.py`
+- Adaptador de embeddings: `{Proveedor}EmbeddingsClient` → en módulo `{proveedor}_embeddings.py`
+- Adaptador de clustering: `{Algoritmo}ClusteringClient` → en módulo `{algoritmo}_clustering.py`
 - Factory: `XClientFactory` → en módulo `x_factory.py`
 
 ### Archivos de referencia
@@ -392,7 +396,23 @@ clients/
 **R-FA-7 — Quien construye, cierra.**
 Los adaptadores exponen `aclose()` (parte del puerto). `main.py` cierra en el
 apagado del `lifespan` solo el cliente que construyó la factory; un cliente
-inyectado desde fuera (tests) lo cierra quien lo inyectó.
+inyectado desde fuera (tests) lo cierra quien lo inyectó. Los cierres se
+registran en un `AsyncExitStack` al construir cada cliente, así que también se
+ejecutan si el arranque falla a mitad (p. ej. falta `EMBEDDINGS_API_KEY`).
+
+### Factories de embeddings y clustering
+
+Mismas reglas R-FA-1…R-FA-7, en `clients/embeddings_factory.py` y
+`clients/clustering_factory.py`:
+
+```
+main.py
+  ├─ EmbeddingsClientFactory.create(settings)      ← EMBEDDINGS_PROVIDER
+  │     ├─ "local"  → LocalEmbeddingsClient   (sentence-transformers)
+  │     └─ "openai" → OpenAIEmbeddingsClient  (API remota, exige EMBEDDINGS_API_KEY)
+  └─ ClusteringClientFactory.create(settings)      ← CLUSTERING_ALGORITHM
+        └─ "hdbscan" → HDBSCANClusteringClient
+```
 
 ### Archivos de referencia
 - `clients/llm.py` — puerto (ver `docs/llm_client_design.md`)
@@ -410,14 +430,15 @@ La siguiente tabla define qué puede importar cada capa. Una flecha `→` signif
 | Capa | Puede importar de | Nunca importa de |
 |---|---|---|
 | `pipeline/contracts/` | `pipeline/contracts/`, `schemas/`, stdlib | infraestructura, servicios, FastAPI |
-| `pipeline/stages/` | contratos, contexto, `schemas/`, `core/`, puertos (`clients/llm.py`, `clients/extractor.py`, `clients/storage.py`) | Supabase, LLM concreto, FastAPI directamente |
+| `pipeline/stages/` | contratos, contexto, `schemas/`, `core/`, puertos (`clients/llm.py`, `clients/extractor.py`, `clients/storage.py`, `clients/embeddings.py`, `clients/clustering.py`); P3/P4 nunca importan adaptadores ni factories | Supabase, LLM concreto, FastAPI directamente |
 | `pipeline/orchestrator.py` | `pipeline/stages/base`, `pipeline/events`, `pipeline/catalog`, `pipeline/context` | contratos concretos, servicios, infraestructura |
 | `repositories/*.py` (puertos) | `schemas/`, `core/errors`, stdlib | supabase, postgrest, openai |
 | `repositories/supabase_*.py` (adaptadores) | su puerto, `schemas/`, `core/`, supabase, postgrest | FastAPI, servicios |
-| `clients/*.py` (puertos) | stdlib, `core/errors`, enums de `pipeline/contracts/common.py` (`FileType`) | supabase, openai, anthropic, httpx, pdfplumber, docx |
+| `clients/*.py` (puertos) | stdlib, `core/errors`, enums de `pipeline/contracts/common.py` (`FileType`) | supabase, openai, anthropic, httpx, pdfplumber, docx, sentence_transformers, hdbscan, numpy |
 | `clients/*_extractor.py` (adaptadores) | su puerto, `core/errors`, `FileType`, librería del formato | FastAPI, servicios, etapas |
+| `clients/*_embeddings.py`, `clients/*_clustering.py` (adaptadores) | su puerto, `core/errors`, librería del proveedor/algoritmo | FastAPI, servicios, etapas, contratos |
 | `clients/*_llm.py` (adaptadores) | su puerto, `core/errors`, librería del proveedor | FastAPI, servicios, contratos |
-| `clients/llm_factory.py` | `config.py`, `core/errors`, adaptadores LLM (lazy) | servicios, etapas, contratos |
+| `clients/*_factory.py` | `config.py`, `core/errors`, adaptadores de su puerto (lazy) | servicios, etapas, contratos |
 | `services/` | puertos (`repositories/`, `clients/`), `pipeline/`, `schemas/`, `core/` | adaptadores concretos (`supabase_*`, `*_llm`) |
 | `api/` | servicios, `schemas/`, `core/` | repositorios, pipeline directamente |
 | `main.py` | todo (es el punto de composición) | — |
