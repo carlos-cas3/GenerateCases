@@ -82,14 +82,17 @@ Antes de definir los modelos conviene fijar lo que ya está decidido fuera de es
 
 #### 1.3.2 `SourceDocument`
 
-Texto plano ya extraído del archivo subido. Es la entrada del pipeline.
+Archivo crudo leído del Storage. Objeto de entrada interno de P1: P1 lee los bytes,
+construye `SourceDocument` y extrae el texto con `DocumentTextExtractor`
+(corrección de D-01, ver `issue_resolver_correccionP1.md`). El texto extraído vive
+en memoria dentro de P1.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `document_id` | UUID | sí | `documents.id` |
 | `filename` | str | sí | |
 | `file_type` | `txt` \| `pdf` \| `docx` | sí | **[Fijado]** |
-| `text` | str | sí | Texto extraído. Quién lo extrae: **[Pendiente D-01]** |
+| `data` | bytes | sí | Bytes crudos del archivo. **[Fijado]** P1 los lee del Storage y extrae el texto. |
 
 #### 1.3.3 `UserStory` (HU estructurada)
 
@@ -790,7 +793,7 @@ La calibración de métricas y umbrales concretos queda pendiente de contar con 
 
 | Artefacto | Lo produce | Lo consume | Persistencia |
 |---|---|---|---|
-| `SourceDocument` | Puerto de extracción (previo a P1) | P1 | `documents` + Storage (el texto no se guarda) |
+| `SourceDocument` | P1 (lee Storage) | P1 (extractor) | `documents` + Storage (el texto no se guarda) |
 | `UserStory` | P1 | P2, P5 | `user_stories` |
 | `StoryClassification` | P2 | API (explica HU sin RF) | `user_stories.classification*` · D-27 |
 | `FunctionalRequirement` | P2 | P3, P4, P5, P6 | `functional_requirements` + `user_story_requirements` |

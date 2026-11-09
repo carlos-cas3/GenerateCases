@@ -83,6 +83,13 @@ class LlmContextLengthError(LlmError):
     default_message = "El prompt supera el límite de contexto del modelo."
 
 
+class StoredDocumentUnavailable(AppError):
+    """No se pudo leer el archivo desde Storage. Lo lanza el adaptador; P1 lo captura."""
+
+    code = "DOCUMENT_UNREADABLE"
+    default_message = "No se pudo leer el archivo del documento."
+
+
 class DocumentExtractionError(AppError):
     """Fallo al extraer texto del archivo. Lo lanzan los adaptadores; P1 lo captura."""
 

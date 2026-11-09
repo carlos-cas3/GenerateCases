@@ -164,3 +164,27 @@ def test_default_extractor_handles_the_three_formats(store: Any) -> None:
         extractor = app.state.extractor
         assert isinstance(extractor, CompositeDocumentExtractor)
         assert set(extractor._extractors) == set(FileType)
+
+
+# --- Storage → extractor (insumos de P1, `issue_resolver_correccionP1.md`) -----------------
+
+
+async def test_storage_download_feeds_the_extractor() -> None:
+    from uuid import uuid4
+
+    from ai_service.core.errors import StoredDocumentUnavailable
+    from ai_service.pipeline.contracts.p1 import SourceDocument
+
+    storage = FakeDocumentStorage()
+    document_id = uuid4()
+    path = await storage.upload(document_id=document_id, filename="hu.txt", content_type="text/plain", data=b"HU-001")
+
+    document = SourceDocument(
+        document_id=document_id, filename="hu.txt", file_type=FileType.TXT, data=await storage.download(path)
+    )
+    extractor = FakeDocumentExtractor(["HU-001"])
+    assert await extractor.extract(document.data, document.file_type) == "HU-001"
+    assert extractor.calls == [(b"HU-001", FileType.TXT)]
+
+    with pytest.raises(StoredDocumentUnavailable):
+        await storage.download("no/existe.txt")

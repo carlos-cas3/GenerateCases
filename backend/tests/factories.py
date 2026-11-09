@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from ai_service.clients.storage import build_storage_path
+from ai_service.core.errors import StoredDocumentUnavailable
 from ai_service.repositories.in_memory import InMemoryStore
 from ai_service.schemas.generations import GenerationStatus, StageKey, StageStatus
 from ai_service.schemas.records import GenerationRecord, StageRecord
@@ -54,6 +55,11 @@ class FakeDocumentStorage:
         self.objects[storage_path] = data
         self.uploads.append(storage_path)
         return storage_path
+
+    async def download(self, storage_path: str) -> bytes:
+        if storage_path not in self.objects:
+            raise StoredDocumentUnavailable()
+        return self.objects[storage_path]
 
     async def remove(self, storage_path: str) -> None:
         self.removes.append(storage_path)

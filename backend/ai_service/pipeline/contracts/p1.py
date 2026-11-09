@@ -3,7 +3,7 @@
 import re
 from uuid import UUID
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from ai_service.pipeline.contracts.common import (
     ContractModel,
@@ -18,15 +18,21 @@ from ai_service.pipeline.contracts.common import (
 
 
 class SourceDocument(ContractModel):
-    """Texto ya extraído del archivo subido (D-01). Lo produce el puerto de extracción; lo consume P1.
+    """Archivo crudo leído del Storage (D-01, `issue_resolver_correccionP1.md`).
 
-    `text` puede venir vacío: es P1 quien lo rechaza con `EMPTY_DOCUMENT`.
+    Objeto de entrada interno de P1, no un contrato compartido entre etapas: P1 lee
+    los bytes del Storage, construye este objeto y extrae el texto con
+    `DocumentTextExtractor`. El texto extraído vive en memoria dentro de P1; no tiene
+    campo aquí ni en `PipelineContext`. Si sale vacío, P1 falla con `EMPTY_DOCUMENT`.
     """
+
+    # Los bytes de un PDF/DOCX no son UTF-8: en JSON viajan en base64.
+    model_config = ConfigDict(ser_json_bytes="base64", val_json_bytes="base64")
 
     document_id: UUID
     filename: NonEmptyStr
     file_type: FileType
-    text: str
+    data: bytes  # bytes crudos del archivo
 
 
 class StorySection(ContractModel):
@@ -105,7 +111,7 @@ class P1Config(ContractModel):
 
 
 class P1Input(ContractModel):
-    """Entrada de P1. La construye el orquestador a partir del documento de la generación."""
+    """Entrada de P1. La construye P1 a partir del documento de la generación (`context.document_id`)."""
 
     generation_id: UUID
     document: SourceDocument

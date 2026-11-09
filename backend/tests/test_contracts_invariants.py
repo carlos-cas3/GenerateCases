@@ -69,6 +69,17 @@ def test_p1_config_rejects_invalid_regex() -> None:
         p1.P1Config(rules_version="v1", story_delimiter_pattern="(", max_story_chars=10)
 
 
+def test_source_document_carries_raw_bytes_not_text() -> None:
+    assert "data" in p1.SourceDocument.model_fields
+    assert "text" not in p1.SourceDocument.model_fields
+
+
+def test_source_document_round_trips_binary_data_as_base64() -> None:
+    binary = b"%PDF-1.4\n\xff\xfe\x00binario"
+    document = f.source_document(file_type="pdf", data=binary)
+    assert p1.SourceDocument.model_validate_json(document.model_dump_json()).data == binary
+
+
 # ---------------------------------------------------------------- P2
 def test_p2_input_rejects_invalid_stories() -> None:
     with pytest.raises(ValidationError, match="invalid no entran"):

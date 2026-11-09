@@ -22,6 +22,10 @@ class DocumentStorage(Protocol):
         """Guarda el archivo y devuelve su `storage_path`."""
         ...
 
+    async def download(self, storage_path: str) -> bytes:
+        """Devuelve los bytes del objeto. Lanza `StoredDocumentUnavailable` si no se puede leer."""
+        ...
+
     async def remove(self, storage_path: str) -> None:
         """Elimina el objeto. Una clave inexistente no es un error."""
         ...

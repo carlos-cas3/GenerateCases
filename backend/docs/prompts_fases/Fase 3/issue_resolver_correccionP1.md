@@ -4,8 +4,10 @@
 > Este documento describe el problema encontrado, la decisión tomada y los cambios
 > que deben realizarse antes de implementar P1 real en Fase 4.
 >
-> **Estado:** pendiente de implementación. La corrección debe aplicarse junto con
-> la implementación del extractor (`issue_resolver_extractor.md`).
+> **Estado:** aplicada en Fase 3 la parte de contrato y puertos: `SourceDocument.data: bytes`
+> (cambio 1), `DocumentStorage.download()` + `StoredDocumentUnavailable` (prerrequisito para
+> que P1 lea el archivo) y `architecture_patterns.md` (cambio 4). Los cambios 2 y 3
+> (`NormalizeStage` real y `build_real_stages`) quedan para Fase 4, junto con la segmentación.
 
 ---
 

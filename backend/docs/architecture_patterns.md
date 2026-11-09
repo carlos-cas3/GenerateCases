@@ -176,7 +176,7 @@ contrato para una tecnología concreta).
 |---|---|---|
 | `DocumentsRepository` | `repositories/documents.py` | `SupabaseDocumentsRepository`, `InMemoryDocumentsRepository` |
 | `GenerationsRepository` | `repositories/generations.py` | `SupabaseGenerationsRepository`, `InMemoryGenerationsRepository` |
-| `DocumentStorage` | `clients/storage.py` | `SupabaseDocumentStorage`, `FakeDocumentStorage` |
+| `DocumentStorage` | `clients/storage.py` | `SupabaseDocumentStorage`, `FakeDocumentStorage` (`upload`, `download`, `remove`; P1 usa `download`) |
 | `ProgressReporter` | `pipeline/events.py` | `RepositoryProgressReporter` |
 | `LlmClient` | `clients/llm.py` | `OpenAILlmClient`, `AnthropicLlmClient`, `OllamaLlmClient` (construidos por `LlmClientFactory`), `FakeLlmClient` |
 | `DocumentTextExtractor` | `clients/extractor.py` | `TxtDocumentExtractor`, `PdfDocumentExtractor`, `DocxDocumentExtractor` (repartidos por `CompositeDocumentExtractor` según `FileType`, sin factory), `FakeDocumentExtractor` |

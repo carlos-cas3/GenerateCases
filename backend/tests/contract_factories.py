@@ -26,7 +26,7 @@ LLM = common.LlmSettings(provider="fake", model="modelo-x", parameters={"tempera
 
 # ---------------------------------------------------------------- P1
 def source_document(**overrides: Any) -> p1.SourceDocument:
-    values = {"document_id": DOCUMENT_ID, "filename": "historias.txt", "file_type": "txt", "text": HU1_TEXT}
+    values = {"document_id": DOCUMENT_ID, "filename": "historias.txt", "file_type": "txt", "data": HU1_TEXT.encode("utf-8")}
     return p1.SourceDocument(**{**values, **overrides})
 
 
