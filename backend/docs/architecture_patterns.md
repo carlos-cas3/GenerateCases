@@ -302,7 +302,87 @@ Su diseño se define al inicio de Fase 8. No crear `contracts/p7.py` hasta enton
 
 ---
 
-## 6. Separación de capas — regla general de imports
+## 6. Factory Pattern
+
+### Qué es en este proyecto
+
+Cuando hay múltiples adaptadores intercambiables para un mismo puerto (OpenAI,
+Anthropic, Ollama para `LlmClient`), una factory centraliza la lógica de
+construcción. `main.py` llama a la factory con `Settings` y recibe un `LlmClient`
+listo para inyectar. Las etapas nunca ven la factory.
+
+```
+main.py
+  └─ LlmClientFactory.create(settings)
+        ├─ "openai"    → OpenAILlmClient     (API remota)
+        ├─ "anthropic" → AnthropicLlmClient  (API remota)
+        └─ "ollama"    → OllamaLlmClient     (servidor local)
+              │
+              └─ devuelve LlmClient (puerto)
+                    ├─ P2Stage.run() lo usa sin saber qué proveedor es
+                    └─ P6Stage.run() lo usa sin saber qué proveedor es
+```
+
+### Reglas
+
+**R-FA-1 — Una factory por puerto con múltiples adaptadores.**  
+Solo se crea una factory cuando un puerto tiene más de un adaptador seleccionable
+en producción. `DocumentsRepository` no necesita factory porque en producción
+siempre es Supabase; `LlmClient` sí la necesita porque el proveedor es
+configurable.
+
+**R-FA-2 — La factory vive en su propio módulo.**  
+`LlmClientFactory` vive en `clients/llm_factory.py`, no en `clients/llm.py`
+(puerto) ni en ningún adaptador. No mezclar la lógica de construcción con el
+contrato ni con la implementación.
+
+**R-FA-3 — Los imports dentro de la factory son lazy.**  
+Cada rama del `match` importa su adaptador dentro del bloque, no a nivel de
+módulo. Así solo se carga la librería del proveedor activo:
+
+```python
+match settings.llm_provider:
+    case "openai":
+        from ai_service.clients.openai_llm import OpenAILlmClient  # lazy
+        return OpenAILlmClient(...)
+    case "anthropic":
+        from ai_service.clients.anthropic_llm import AnthropicLlmClient  # lazy
+        return AnthropicLlmClient(...)
+```
+
+**R-FA-4 — La factory falla explícitamente ante proveedor desconocido.**  
+Si `settings.llm_provider` no coincide con ningún caso, lanza
+`ConfigurationError` con mensaje que lista los valores válidos. Nunca devolver
+`None` ni un adaptador por defecto silencioso.
+
+**R-FA-5 — Solo `main.py` llama a la factory.**  
+La factory es infraestructura de composición, no lógica de aplicación.
+Ningún servicio, etapa ni repositorio importa `LlmClientFactory`.
+
+**R-FA-6 — El fake no pasa por la factory.**  
+`FakeLlmClient` se inyecta directamente en los tests por constructor.
+No añadir `"fake"` como caso válido en la factory de producción.
+
+### Estructura de módulos para LlmClient
+
+```
+clients/
+  llm.py              ← Puerto: LlmClient (Protocol), LlmRequest, LlmResponse
+  llm_factory.py      ← Factory: LlmClientFactory.create(settings) → LlmClient
+  openai_llm.py       ← Adaptador OpenAI
+  anthropic_llm.py    ← Adaptador Anthropic
+  ollama_llm.py       ← Adaptador Ollama (servidor local)
+  llm_fake.py         ← Fake determinista para tests
+```
+
+### Archivos de referencia (pendientes de crear)
+- `clients/llm.py` — puerto (ver `docs/llm_client_design.md`)
+- `clients/llm_factory.py` — factory
+- `docs/llm_client_design.md` — especificación completa de implementación
+
+---
+
+## 7. Separación de capas — regla general de imports
 
 La siguiente tabla define qué puede importar cada capa. Una flecha `→` significa
 "puede importar de". Una `✗` significa que está prohibido.
@@ -310,11 +390,14 @@ La siguiente tabla define qué puede importar cada capa. Una flecha `→` signif
 | Capa | Puede importar de | Nunca importa de |
 |---|---|---|
 | `pipeline/contracts/` | `pipeline/contracts/`, `schemas/`, stdlib | infraestructura, servicios, FastAPI |
-| `pipeline/stages/` | contratos, contexto, `schemas/`, `core/` | Supabase, LLM, FastAPI directamente |
+| `pipeline/stages/` | contratos, contexto, `schemas/`, `core/`, puertos (`clients/llm.py`) | Supabase, LLM concreto, FastAPI directamente |
 | `pipeline/orchestrator.py` | `pipeline/stages/base`, `pipeline/events`, `pipeline/catalog`, `pipeline/context` | contratos concretos, servicios, infraestructura |
 | `repositories/*.py` (puertos) | `schemas/`, `core/errors`, stdlib | supabase, postgrest, openai |
 | `repositories/supabase_*.py` (adaptadores) | su puerto, `schemas/`, `core/`, supabase, postgrest | FastAPI, servicios |
-| `services/` | puertos (`repositories/`, `clients/`), `pipeline/`, `schemas/`, `core/` | adaptadores concretos (`supabase_*`) |
+| `clients/*.py` (puertos) | stdlib, `core/errors` | supabase, openai, anthropic, httpx |
+| `clients/*_llm.py` (adaptadores) | su puerto, `core/errors`, librería del proveedor | FastAPI, servicios, contratos |
+| `clients/llm_factory.py` | `config.py`, `core/errors`, adaptadores LLM (lazy) | servicios, etapas, contratos |
+| `services/` | puertos (`repositories/`, `clients/`), `pipeline/`, `schemas/`, `core/` | adaptadores concretos (`supabase_*`, `*_llm`) |
 | `api/` | servicios, `schemas/`, `core/` | repositorios, pipeline directamente |
 | `main.py` | todo (es el punto de composición) | — |
 
@@ -328,9 +411,12 @@ verificar:
 - [ ] ¿La etapa hereda de `StageBase` y solo recibe `PipelineContext`?
 - [ ] ¿El orquestador sigue sin importar ningún contrato concreto?
 - [ ] ¿El puerto (Protocol) está en un módulo sin imports de infraestructura?
-- [ ] ¿El adaptador Supabase/LLM está en un módulo `supabase_*.py` separado?
+- [ ] ¿El adaptador Supabase/LLM está en un módulo separado (`supabase_*.py`, `*_llm.py`)?
 - [ ] ¿Los errores de infraestructura se traducen a excepciones de dominio antes de salir del adaptador?
 - [ ] ¿`main.py` es el único lugar que importa los adaptadores concretos?
+- [ ] Si hay múltiples adaptadores para un puerto, ¿existe una factory en `*_factory.py`?
+- [ ] ¿Los imports dentro de la factory son lazy (dentro del `match`, no a nivel de módulo)?
+- [ ] ¿El fake del nuevo cliente se inyecta por constructor en tests, sin pasar por la factory?
 - [ ] ¿El contrato nuevo hereda de `ContractModel` (`frozen=True`, `extra="forbid"`)?
 - [ ] ¿Las invariantes del contrato están en `@model_validator`, no en la etapa?
 - [ ] ¿Los datos del dominio viajan por `PipelineContext`, no por `StageResult`?
