@@ -137,16 +137,17 @@ class RequirementsStage(StageBase):
 ```
 
 **R-DI-3 — Los tests inyectan fakes, no mocks de librería.**  
-Los tests usan `InMemoryGenerationsRepository`, `InMemoryDocumentsRepository` y
-`FakeDocumentStorage`. No parchean clientes de Supabase con `unittest.mock`.
-Cuando se añadan `LlmClient` y `EmbeddingsClient`, sus fakes deben vivir en
-`tests/` o en un módulo `*_fake.py` al lado del puerto.
+Los tests usan `InMemoryGenerationsRepository`, `InMemoryDocumentsRepository`,
+`FakeDocumentStorage` y `FakeLlmClient` (`clients/llm_fake.py`). No parchean
+clientes de Supabase ni SDKs de LLM con `unittest.mock`; los adaptadores LLM se
+prueban con `httpx.MockTransport`. Cuando se añada `EmbeddingsClient`, su fake
+debe vivir en `tests/` o en un módulo `*_fake.py` al lado del puerto.
 
 **R-DI-4 — `create_app()` acepta inyección externa.**  
 La firma de `create_app()` debe mantener los parámetros opcionales de
-repositorios y storage para que los tests puedan inyectar fakes sin Supabase.
-Al añadir nuevos puertos (LLM, embeddings), se añaden como parámetros opcionales
-con el mismo patrón.
+repositorios, storage y `llm_client` para que los tests puedan inyectar fakes
+sin Supabase ni proveedor LLM. Al añadir nuevos puertos (embeddings), se añaden
+como parámetros opcionales con el mismo patrón.
 
 **R-DI-5 — Los imports de adaptadores en `main.py` son lazy.**  
 Los adaptadores Supabase se importan dentro del bloque `if` del `lifespan`,
@@ -176,12 +177,12 @@ contrato para una tecnología concreta).
 | `GenerationsRepository` | `repositories/generations.py` | `SupabaseGenerationsRepository`, `InMemoryGenerationsRepository` |
 | `DocumentStorage` | `clients/storage.py` | `SupabaseDocumentStorage`, `FakeDocumentStorage` |
 | `ProgressReporter` | `pipeline/events.py` | `RepositoryProgressReporter` |
+| `LlmClient` | `clients/llm.py` | `OpenAILlmClient`, `AnthropicLlmClient`, `OllamaLlmClient` (construidos por `LlmClientFactory`), `FakeLlmClient` |
 
 ### Puertos pendientes (Fase 4)
 
 | Puerto | Módulo previsto | Usado por |
 |---|---|---|
-| `LlmClient` | `clients/llm.py` | P2, P6 |
 | `DocumentTextExtractor` | `clients/extractor.py` | P1 |
 | `EmbeddingsClient` | `clients/embeddings.py` | P3 |
 
@@ -231,7 +232,9 @@ Solo `main.py` los importa, y de forma lazy dentro del `lifespan`.
 **R-AP-6 — Nombrado consistente.**  
 - Puerto: `XRepository`, `XStorage`, `XClient` → en módulo `x.py`
 - Adaptador Supabase: `SupabaseXRepository`, `SupabaseXStorage` → en módulo `supabase_x.py`
-- Adaptador de tests: `InMemoryXRepository`, `FakeXStorage` → en módulo `in_memory.py` o `x_fake.py`
+- Adaptador de tests: `InMemoryXRepository`, `FakeXStorage`, `FakeXClient` → en módulo `in_memory.py` o `x_fake.py`
+- Adaptador de proveedor LLM: `{Proveedor}LlmClient` → en módulo `{proveedor}_llm.py`
+- Factory: `XClientFactory` → en módulo `x_factory.py`
 
 ### Archivos de referencia
 - `repositories/documents.py` — ejemplo de puerto limpio
@@ -353,7 +356,10 @@ match settings.llm_provider:
 **R-FA-4 — La factory falla explícitamente ante proveedor desconocido.**  
 Si `settings.llm_provider` no coincide con ningún caso, lanza
 `ConfigurationError` con mensaje que lista los valores válidos. Nunca devolver
-`None` ni un adaptador por defecto silencioso.
+`None` ni un adaptador por defecto silencioso. Lo mismo aplica si falta una
+variable obligatoria del proveedor elegido (`LLM_API_KEY` para OpenAI/Anthropic,
+`LLM_BASE_URL` para Ollama): la factory valida esa coherencia, igual que
+`create_supabase_client()` valida las credenciales de Supabase.
 
 **R-FA-5 — Solo `main.py` llama a la factory.**  
 La factory es infraestructura de composición, no lógica de aplicación.
@@ -375,9 +381,15 @@ clients/
   llm_fake.py         ← Fake determinista para tests
 ```
 
-### Archivos de referencia (pendientes de crear)
+**R-FA-7 — Quien construye, cierra.**
+Los adaptadores exponen `aclose()` (parte del puerto). `main.py` cierra en el
+apagado del `lifespan` solo el cliente que construyó la factory; un cliente
+inyectado desde fuera (tests) lo cierra quien lo inyectó.
+
+### Archivos de referencia
 - `clients/llm.py` — puerto (ver `docs/llm_client_design.md`)
 - `clients/llm_factory.py` — factory
+- `tests/test_llm_clients.py` — pruebas de factory, fake y adaptadores
 - `docs/llm_client_design.md` — especificación completa de implementación
 
 ---

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ai_service.api.errors import register_exception_handlers
 from ai_service.api.routes import documents, generations, health
+from ai_service.clients.llm import LlmClient  # puerto
 from ai_service.clients.storage import DocumentStorage  # puerto
 from ai_service.config import Settings, get_settings
 from ai_service.core.logging import configure_logging
@@ -30,8 +31,13 @@ def create_app(
     generations_repository: GenerationsRepository | None = None,
     documents_repository: DocumentsRepository | None = None,
     documents_storage: DocumentStorage | None = None,
+    llm_client: LlmClient | None = None,
 ) -> FastAPI:
-    """Construye la aplicación. Repositorios y Storage se inyectan en tests; si no, se usa Supabase."""
+    """Construye la aplicación.
+
+    Repositorios, Storage y cliente LLM se inyectan en tests (R-DI-4); si no, se usan
+    Supabase y el proveedor LLM que indique `LLM_PROVIDER` (vía `LlmClientFactory`).
+    """
     configure_logging()
     app_settings = settings or get_settings()
 
@@ -50,6 +56,15 @@ def create_app(
             generations_repo = generations_repo or SupabaseGenerationsRepository(client)
             documents_repo = documents_repo or SupabaseDocumentsRepository(client)
             storage = storage or SupabaseDocumentStorage(client, app_settings.documents_bucket)
+
+        llm = llm_client
+        if llm is None:
+            from ai_service.clients.llm_factory import LlmClientFactory  # factory (R-FA-5)
+
+            llm = LlmClientFactory.create(app_settings)
+        # Las etapas P2/P6 aún son stubs: el cliente se expone para inyectarlo en ellas
+        # (Fase 4, `build_real_stages`). Nadie más debe leerlo de aquí.
+        app.state.llm_client = llm
 
         # Supone un único proceso: nada activo puede seguir vivo tras el arranque.
         await recover_interrupted_generations(generations_repo)
@@ -70,7 +85,11 @@ def create_app(
             max_upload_size_bytes=app_settings.max_upload_size_bytes,
         )
         logger.info("Servicio iniciado")
-        yield
+        try:
+            yield
+        finally:
+            if llm_client is None:  # solo se cierra lo que construyó la factory
+                await llm.aclose()
 
     app = FastAPI(title="TestGen API", version="2.0.0", lifespan=lifespan)
     app.add_middleware(

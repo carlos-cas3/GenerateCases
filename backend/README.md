@@ -422,6 +422,13 @@ Requisitos de Supabase para ejecutar en local (copia `.env.example` a `.env`):
 - `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` con las credenciales del proyecto.
 - `DOCUMENTS_BUCKET` (por defecto `docs_testgen`): bucket **privado** de Supabase Storage que debe existir antes de subir documentos (lo crea el final de `supabase/schema.sql`). Su límite de tamaño debe admitir al menos `MAX_UPLOAD_SIZE_BYTES` (20 MiB).
 
+Requisitos del cliente LLM (se construye al arrancar; si falta una variable obligatoria del proveedor, el servicio no inicia):
+
+- `LLM_PROVIDER`: `openai` (por defecto), `anthropic` u `ollama`.
+- `LLM_API_KEY`: obligatoria para `openai` y `anthropic`.
+- `LLM_BASE_URL`: obligatoria para `ollama` (p. ej. `http://localhost:11434`); opcional como proxy para los demás.
+- `LLM_TIMEOUT_SECONDS` (por defecto 60). Detalle en `docs/llm_client_design.md`.
+
 El comando de instalación debe ajustarse al archivo de dependencias real del repositorio. Si la aplicación expone `app` en `ai_service/main.py`, también puede iniciarse con:
 
 ```bash

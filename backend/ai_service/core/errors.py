@@ -55,6 +55,34 @@ class FeatureNotImplemented(AppError):
     default_message = "Funcionalidad aún no implementada."
 
 
+class LlmError(AppError):
+    """Fallo en la llamada al LLM. Los adaptadores lo lanzan; las etapas lo capturan."""
+
+    code = "LLM_ERROR"
+    default_message = "Falló la llamada al modelo de lenguaje."
+
+
+class LlmRateLimitError(LlmError):
+    """El proveedor rechazó la llamada por límite de tasa. Reintentable."""
+
+    code = "LLM_RATE_LIMIT"
+    default_message = "El proveedor del modelo de lenguaje rechazó la llamada por límite de tasa."
+
+
+class LlmInvalidResponseError(LlmError):
+    """La respuesta no es JSON válido o no supera la validación del contrato."""
+
+    code = "LLM_INVALID_OUTPUT"
+    default_message = "La respuesta del modelo de lenguaje no es válida."
+
+
+class LlmContextLengthError(LlmError):
+    """El prompt supera el límite de tokens del modelo."""
+
+    code = "LLM_CONTEXT_LENGTH"
+    default_message = "El prompt supera el límite de contexto del modelo."
+
+
 class InvalidStateTransition(Exception):
     """Una actualización con guarda de estado no afectó ninguna fila. Error interno."""
 

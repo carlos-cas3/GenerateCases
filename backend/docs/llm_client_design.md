@@ -3,6 +3,12 @@
 > Fase 4 — prerequisito para implementar P2 y P6.  
 > Este documento describe qué construir, por qué y cómo debe encajar con los
 > patrones definidos en `architecture_patterns.md`.
+>
+> **Estado:** implementado al cierre de Fase 3 (pasos 1–10 del orden sugerido,
+> salvo `build_real_stages`). Las etapas P2 y P6 siguen siendo stubs: el
+> `LlmClient` ya se construye en `main.py` y queda listo para inyectarse en ellas
+> en Fase 4. Registro de cambios en
+> `docs/prompts_fases/Fase 3/resultados_patrones_LLMDisenoCliente.md`.
 
 ---
 
@@ -34,7 +40,7 @@ en `architecture_patterns.md`.
 
 ### Factory Pattern (nuevo)
 Una factory lee `Settings` y construye el adaptador correcto. Es el único lugar
-del sistema donde existe un `if provider == "openai"`. Ver sección 7 de
+del sistema donde existe un `if provider == "openai"`. Ver sección 6 de
 `architecture_patterns.md`.
 
 ### Dependency Injection
@@ -68,7 +74,7 @@ El puerto define exactamente lo que las etapas pueden pedirle a un LLM.
 ```python
 # clients/llm.py — solo stdlib, sin imports de infraestructura (R-AP-2)
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 
@@ -77,6 +83,7 @@ class LlmRequest:
     """Solicitud al LLM. El prompt ya viene formateado por la etapa."""
     prompt: str
     model: str           # modelo concreto, viene de LlmSettings del contrato
+    system: str | None = None   # D-LLM-1: instrucciones de sistema
     max_tokens: int | None = None
     temperature: float | None = None
     # parámetros adicionales específicos del proveedor (timeout, top_p, etc.)
@@ -97,6 +104,10 @@ class LlmClient(Protocol):
 
     async def complete(self, request: LlmRequest) -> LlmResponse:
         """Envía el prompt y devuelve la respuesta. Lanza LlmError ante fallos."""
+        ...
+
+    async def aclose(self) -> None:
+        """Libera conexiones. main.py lo llama al apagar (R-FA-7)."""
         ...
 ```
 
@@ -126,6 +137,10 @@ class LlmContextLengthError(LlmError):
     """El prompt supera el límite de tokens del modelo."""
 ```
 
+Códigos implementados: `LLM_ERROR`, `LLM_RATE_LIMIT`, `LLM_INVALID_OUTPUT`
+(coincide con el código de error de etapa ya citado en `openapi.yaml`) y
+`LLM_CONTEXT_LENGTH`.
+
 Regla R-AP-4: los adaptadores traducen errores de librería a estos tipos antes
 de que salgan del adaptador. Las etapas solo conocen `LlmError` y sus subtipos.
 
@@ -138,7 +153,8 @@ de que salgan del adaptador. Las etapas solo conocen `LlmError` y sus subtipos.
 Cada adaptador sigue el mismo esquema:
 
 ```
-1. Recibe el cliente de librería por constructor (inyectado por la factory)
+1. Recibe el cliente de librería ya construido por constructor
+   (AsyncOpenAI / AsyncAnthropic / httpx.AsyncClient, creado por la factory)
 2. Traduce LlmRequest → llamada de librería
 3. Traduce respuesta de librería → LlmResponse
 4. Captura excepciones de librería → lanza LlmError del dominio
@@ -148,9 +164,11 @@ Cada adaptador sigue el mismo esquema:
 
 - Librería: `openai` (cliente async `AsyncOpenAI`)
 - Método: `client.chat.completions.create()`
+- `system` → mensaje `role: "system"`; `max_tokens` → `max_completion_tokens`
+  (parámetro vigente de Chat Completions); `extra` se pasa tal cual.
 - Errores a traducir: `RateLimitError` → `LlmRateLimitError`,
-  `BadRequestError` (context length) → `LlmContextLengthError`,
-  resto → `LlmError`
+  `BadRequestError` con `code == "context_length_exceeded"` → `LlmContextLengthError`,
+  resto → `LlmError`. Respuesta sin texto → `LlmInvalidResponseError`.
 - Tokens: disponibles en `response.usage.prompt_tokens` / `completion_tokens`
 - Latencia: medir con `time.monotonic()` alrededor de la llamada
 
@@ -158,26 +176,33 @@ Cada adaptador sigue el mismo esquema:
 
 - Librería: `anthropic` (cliente async `AsyncAnthropic`)
 - Método: `client.messages.create()`
-- Modelo de mensajes: Anthropic requiere separar `system` prompt de `user`
-  prompt. El adaptador debe partir el prompt en dos si el `LlmRequest` lo
-  necesita — o bien el puerto `LlmRequest` añade un campo opcional `system: str | None`.
-- Errores a traducir: `RateLimitError` → `LlmRateLimitError`,
-  `BadRequestError` → `LlmContextLengthError`, resto → `LlmError`
+- Modelo de mensajes: `LlmRequest.system` va al parámetro `system` de la API y
+  el prompt como único mensaje `user` (D-LLM-1 resuelta).
+- `max_tokens` es obligatorio en la Messages API: si la solicitud no lo fija se
+  usa `DEFAULT_MAX_TOKENS = 4096`.
+- Errores a traducir: `RateLimitError` → `LlmRateLimitError`;
+  `BadRequestError` cuyo mensaje contiene "prompt is too long" o HTTP 413 →
+  `LlmContextLengthError`; resto (incluido otro `BadRequestError`) → `LlmError`.
+  Traducir todo `BadRequestError` a contexto excedido ocultaría errores de
+  parámetros.
 - Tokens: disponibles en `response.usage.input_tokens` / `output_tokens`
 
-> **Decisión pendiente:** Anthropic separa system/user en la API. Evaluar si
-> `LlmRequest` añade `system: str | None = None` o si el adaptador de Anthropic
-> maneja el prompt completo como `user`. Decidir antes de implementar
-> `anthropic_llm.py`.
+- Texto: concatenación de los bloques `type == "text"` de `response.content`.
 
 ### `clients/ollama_llm.py`
 
-- Librería: `httpx` (cliente async) o librería `ollama`
-- Endpoint: `POST {base_url}/api/generate` o `/api/chat`
-- El modelo se pasa en el body (`"model": request.model`)
-- Errores: conexión rechazada → `LlmError` con mensaje claro sobre Ollama no disponible
+- Librería: `httpx` (cliente async) directo (D-LLM-2 resuelta)
+- Endpoint: `POST {base_url}/api/chat` con `"stream": false`; `system` va como
+  mensaje `role: "system"`
+- El modelo se pasa en el body (`"model": request.model`); `max_tokens` →
+  `options.num_predict`; `temperature` y `extra` → `options`
+- Errores: conexión rechazada → `LlmError` con mensaje claro sobre Ollama no
+  disponible; HTTP 429 → `LlmRateLimitError`; otro HTTP de error → `LlmError`;
+  cuerpo no JSON o sin `message.content` → `LlmInvalidResponseError`
 - Tokens: Ollama los devuelve en `prompt_eval_count` / `eval_count`
-- Latencia: disponible en `eval_duration` (nanosegundos → convertir a ms)
+- Latencia: `total_duration` (nanosegundos → ms). Se prefiere a `eval_duration`
+  porque esta excluye la evaluación del prompt y la carga del modelo; si falta,
+  se usa la medida con `time.monotonic()`.
 
 ---
 
@@ -225,6 +250,13 @@ Los imports dentro del `match` son lazy — solo se carga la librería del
 proveedor activo, no las tres. Esto cumple R-DI-5 (imports lazy de adaptadores)
 aplicado a la factory.
 
+> **Implementado:** la factory construye también el cliente de librería
+> (`AsyncOpenAI` / `AsyncAnthropic` con `max_retries=0`, `httpx.AsyncClient`) y
+> se lo pasa al adaptador, que así se prueba con `httpx.MockTransport`. Los
+> reintentos los decidirá la etapa, no el SDK. La factory valida que exista
+> `LLM_API_KEY` (OpenAI/Anthropic) o `LLM_BASE_URL` (Ollama) y lanza
+> `ConfigurationError` si falta.
+
 ---
 
 ## Fake para tests — `clients/llm_fake.py`
@@ -251,6 +283,12 @@ class FakeLlmClient:
 El fake es determinista: se construye con la lista de respuestas que devolverá
 en orden. Los tests no necesitan `unittest.mock.patch` ni monkeypatching (R-DI-3).
 
+> **Implementado con ajustes:** cada elemento puede ser un texto o una
+> `LlmError` (que se lanza en su turno, para probar reintentos); las solicitudes
+> recibidas quedan en `fake.requests`; al agotarse lanza `AssertionError` con un
+> mensaje claro (un `StopIteration` dentro de una corrutina se convierte en un
+> `RuntimeError` confuso). `aclose()` es un no-op que marca `fake.closed`.
+
 ---
 
 ## Variables de entorno a añadir en `config.py`
@@ -273,6 +311,12 @@ Validador necesario: si `llm_provider` es `openai` o `anthropic`, `llm_api_key`
 no puede ser `None`. Si `llm_provider` es `ollama`, `llm_base_url` no puede
 ser `None`.
 
+> **Implementado en la factory, no en `Settings`:** un `model_validator` en
+> `Settings` haría fallar cualquier `Settings()` sin credenciales LLM (tests,
+> scripts que no usan el LLM). La comprobación vive en `LlmClientFactory.create()`,
+> que se ejecuta en el arranque, igual que `create_supabase_client()`. Un valor
+> vacío en `.env` (`LLM_API_KEY=`, `LLM_BASE_URL=`) cuenta como ausente.
+
 ---
 
 ## Cómo se inyecta en las etapas
@@ -280,14 +324,21 @@ ser `None`.
 En `main.py`/`lifespan`:
 
 ```python
-from ai_service.clients.llm_factory import LlmClientFactory
+# Implementado (create_app acepta llm_client opcional, R-DI-4):
+llm = llm_client
+if llm is None:
+    from ai_service.clients.llm_factory import LlmClientFactory
+    llm = LlmClientFactory.create(app_settings)
+app.state.llm_client = llm
+...
+try:
+    yield
+finally:
+    if llm_client is None:      # solo se cierra lo que construyó la factory
+        await llm.aclose()
 
-llm_client = LlmClientFactory.create(app_settings)
-
-stages = build_real_stages(
-    llm_client=llm_client,
-    ...
-)
+# Pendiente (Fase 4), cuando existan las etapas reales:
+stages = build_real_stages(llm_client=llm, ...)
 ```
 
 En las etapas:
@@ -321,10 +372,21 @@ class RequirementsStage(StageBase):
 
 ---
 
-## Decisiones pendientes antes de implementar
+## Decisiones
 
 | # | Decisión | Impacto |
 |---|---|---|
 | D-LLM-1 | ¿`LlmRequest` tiene `system: str \| None`? | Afecta al puerto y a todos los adaptadores |
 | D-LLM-2 | ¿Se usa la librería `ollama` o `httpx` directo para Ollama? | Afecta solo a `ollama_llm.py` |
 | D-LLM-3 | ¿El modelo se define solo en `LlmSettings` del contrato o también hay un modelo por defecto en `Settings`? | Afecta a `config.py` y a la factory |
+
+Resolución (cierre de Fase 3):
+
+- **D-LLM-1 — resuelta.** `LlmRequest` incluye `system: str | None = None`.
+  Anthropic lo pasa en el parámetro `system`; OpenAI y Ollama como mensaje
+  `role: "system"`.
+- **D-LLM-2 — resuelta.** `httpx` directo: ya es dependencia (transitiva de
+  supabase, openai y anthropic) y permite probar con `httpx.MockTransport`.
+- **D-LLM-3 — abierta.** No afecta a la factory: el modelo viaja en cada
+  `LlmRequest`. Se decide en Fase 4 al construir `P2Config`/`P6Config`.
+  Propuesta: `LLM_MODEL` en `Settings` como fuente de `LlmSettings.model`.
