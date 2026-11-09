@@ -8,6 +8,7 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 
+from ai_service.clients.extractor_fake import FakeDocumentExtractor
 from ai_service.clients.llm_fake import FakeLlmClient
 from ai_service.config import Settings
 from ai_service.main import create_app
@@ -63,6 +64,7 @@ def client_factory(store: InMemoryStore, storage: FakeDocumentStorage) -> Iterat
             documents_repository=InMemoryDocumentsRepository(store),
             documents_storage=storage,
             llm_client=FakeLlmClient(),
+            extractor=FakeDocumentExtractor(),
         )
         client = TestClient(app, raise_server_exceptions=raise_server_exceptions)
         client.__enter__()

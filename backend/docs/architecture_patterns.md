@@ -140,7 +140,8 @@ class RequirementsStage(StageBase):
 Los tests usan `InMemoryGenerationsRepository`, `InMemoryDocumentsRepository`,
 `FakeDocumentStorage` y `FakeLlmClient` (`clients/llm_fake.py`). No parchean
 clientes de Supabase ni SDKs de LLM con `unittest.mock`; los adaptadores LLM se
-prueban con `httpx.MockTransport`. Cuando se añada `EmbeddingsClient`, su fake
+prueban con `httpx.MockTransport`. El extractor tiene `FakeDocumentExtractor`
+(`clients/extractor_fake.py`). Cuando se añada `EmbeddingsClient`, su fake
 debe vivir en `tests/` o en un módulo `*_fake.py` al lado del puerto.
 
 **R-DI-4 — `create_app()` acepta inyección externa.**  
@@ -178,12 +179,12 @@ contrato para una tecnología concreta).
 | `DocumentStorage` | `clients/storage.py` | `SupabaseDocumentStorage`, `FakeDocumentStorage` |
 | `ProgressReporter` | `pipeline/events.py` | `RepositoryProgressReporter` |
 | `LlmClient` | `clients/llm.py` | `OpenAILlmClient`, `AnthropicLlmClient`, `OllamaLlmClient` (construidos por `LlmClientFactory`), `FakeLlmClient` |
+| `DocumentTextExtractor` | `clients/extractor.py` | `TxtDocumentExtractor`, `PdfDocumentExtractor`, `DocxDocumentExtractor` (repartidos por `CompositeDocumentExtractor` según `FileType`, sin factory), `FakeDocumentExtractor` |
 
 ### Puertos pendientes (Fase 4)
 
 | Puerto | Módulo previsto | Usado por |
 |---|---|---|
-| `DocumentTextExtractor` | `clients/extractor.py` | P1 |
 | `EmbeddingsClient` | `clients/embeddings.py` | P3 |
 
 ### Reglas
@@ -197,7 +198,10 @@ Nunca mezclar puerto y adaptador en el mismo archivo.
 **R-AP-2 — El puerto no importa infraestructura.**  
 Un módulo de puerto (`repositories/documents.py`, `clients/storage.py`, etc.)
 solo puede importar: tipos de la librería estándar, schemas de dominio propios
-(`schemas/`), y errores de dominio (`core/errors.py`).  
+(`schemas/`), y errores de dominio (`core/errors.py`). Excepción acotada: el
+puerto `DocumentTextExtractor` importa el enum `FileType` de
+`pipeline/contracts/common.py` (solo pydantic/stdlib, sin infraestructura) para no
+duplicar el tipo de archivo.  
 Nunca importar `supabase`, `postgrest`, `openai`, `httpx` ni ninguna librería
 de infraestructura en un módulo de puerto.
 
@@ -234,6 +238,7 @@ Solo `main.py` los importa, y de forma lazy dentro del `lifespan`.
 - Adaptador Supabase: `SupabaseXRepository`, `SupabaseXStorage` → en módulo `supabase_x.py`
 - Adaptador de tests: `InMemoryXRepository`, `FakeXStorage`, `FakeXClient` → en módulo `in_memory.py` o `x_fake.py`
 - Adaptador de proveedor LLM: `{Proveedor}LlmClient` → en módulo `{proveedor}_llm.py`
+- Adaptador de extracción por formato: `{Formato}DocumentExtractor` → en módulo `{formato}_extractor.py`
 - Factory: `XClientFactory` → en módulo `x_factory.py`
 
 ### Archivos de referencia
@@ -332,7 +337,10 @@ main.py
 Solo se crea una factory cuando un puerto tiene más de un adaptador seleccionable
 en producción. `DocumentsRepository` no necesita factory porque en producción
 siempre es Supabase; `LlmClient` sí la necesita porque el proveedor es
-configurable.
+configurable. `DocumentTextExtractor` tampoco la necesita: sus tres adaptadores
+coexisten siempre y el tipo de archivo de cada llamada decide cuál se usa, así
+que `main.py` construye directamente un `CompositeDocumentExtractor` que delega
+por `FileType`.
 
 **R-FA-2 — La factory vive en su propio módulo.**  
 `LlmClientFactory` vive en `clients/llm_factory.py`, no en `clients/llm.py`
@@ -402,11 +410,12 @@ La siguiente tabla define qué puede importar cada capa. Una flecha `→` signif
 | Capa | Puede importar de | Nunca importa de |
 |---|---|---|
 | `pipeline/contracts/` | `pipeline/contracts/`, `schemas/`, stdlib | infraestructura, servicios, FastAPI |
-| `pipeline/stages/` | contratos, contexto, `schemas/`, `core/`, puertos (`clients/llm.py`) | Supabase, LLM concreto, FastAPI directamente |
+| `pipeline/stages/` | contratos, contexto, `schemas/`, `core/`, puertos (`clients/llm.py`, `clients/extractor.py`, `clients/storage.py`) | Supabase, LLM concreto, FastAPI directamente |
 | `pipeline/orchestrator.py` | `pipeline/stages/base`, `pipeline/events`, `pipeline/catalog`, `pipeline/context` | contratos concretos, servicios, infraestructura |
 | `repositories/*.py` (puertos) | `schemas/`, `core/errors`, stdlib | supabase, postgrest, openai |
 | `repositories/supabase_*.py` (adaptadores) | su puerto, `schemas/`, `core/`, supabase, postgrest | FastAPI, servicios |
-| `clients/*.py` (puertos) | stdlib, `core/errors` | supabase, openai, anthropic, httpx |
+| `clients/*.py` (puertos) | stdlib, `core/errors`, enums de `pipeline/contracts/common.py` (`FileType`) | supabase, openai, anthropic, httpx, pdfplumber, docx |
+| `clients/*_extractor.py` (adaptadores) | su puerto, `core/errors`, `FileType`, librería del formato | FastAPI, servicios, etapas |
 | `clients/*_llm.py` (adaptadores) | su puerto, `core/errors`, librería del proveedor | FastAPI, servicios, contratos |
 | `clients/llm_factory.py` | `config.py`, `core/errors`, adaptadores LLM (lazy) | servicios, etapas, contratos |
 | `services/` | puertos (`repositories/`, `clients/`), `pipeline/`, `schemas/`, `core/` | adaptadores concretos (`supabase_*`, `*_llm`) |

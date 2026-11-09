@@ -4,7 +4,8 @@
 > Este documento describe qué construir, por qué y cómo debe encajar con los
 > patrones definidos en `architecture_patterns.md`.
 >
-> **Estado:** pendiente de implementación. Las decisiones aquí registradas
+> **Estado:** implementado (puerto, adaptadores TXT/PDF/DOCX, compuesto por `FileType`,
+> fake y cableado en `create_app`). Las decisiones aquí registradas
 > están tomadas y no requieren nueva aprobación antes de implementar.
 
 ---

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ai_service.api.errors import register_exception_handlers
 from ai_service.api.routes import documents, generations, health
+from ai_service.clients.extractor import DocumentTextExtractor  # puerto
 from ai_service.clients.llm import LlmClient  # puerto
 from ai_service.clients.storage import DocumentStorage  # puerto
 from ai_service.config import Settings, get_settings
@@ -32,11 +33,13 @@ def create_app(
     documents_repository: DocumentsRepository | None = None,
     documents_storage: DocumentStorage | None = None,
     llm_client: LlmClient | None = None,
+    extractor: DocumentTextExtractor | None = None,
 ) -> FastAPI:
     """Construye la aplicación.
 
-    Repositorios, Storage y cliente LLM se inyectan en tests (R-DI-4); si no, se usan
-    Supabase y el proveedor LLM que indique `LLM_PROVIDER` (vía `LlmClientFactory`).
+    Repositorios, Storage, cliente LLM y extractor se inyectan en tests (R-DI-4); si no,
+    se usan Supabase, el proveedor LLM que indique `LLM_PROVIDER` (vía `LlmClientFactory`)
+    y los extractores TXT/PDF/DOCX reales.
     """
     configure_logging()
     app_settings = settings or get_settings()
@@ -65,6 +68,25 @@ def create_app(
         # Las etapas P2/P6 aún son stubs: el cliente se expone para inyectarlo en ellas
         # (Fase 4, `build_real_stages`). Nadie más debe leerlo de aquí.
         app.state.llm_client = llm
+
+        document_extractor = extractor
+        if document_extractor is None:
+            # Sin factory (D-EXT-5): los tres adaptadores coexisten y el tipo de archivo elige.
+            from ai_service.clients.composite_extractor import CompositeDocumentExtractor
+            from ai_service.clients.docx_extractor import DocxDocumentExtractor  # adaptador
+            from ai_service.clients.pdf_extractor import PdfDocumentExtractor  # adaptador
+            from ai_service.clients.txt_extractor import TxtDocumentExtractor  # adaptador
+            from ai_service.pipeline.contracts.common import FileType
+
+            document_extractor = CompositeDocumentExtractor(
+                {
+                    FileType.TXT: TxtDocumentExtractor(),
+                    FileType.PDF: PdfDocumentExtractor(),
+                    FileType.DOCX: DocxDocumentExtractor(),
+                }
+            )
+        # Igual que el cliente LLM: se inyectará en P1 al construir `build_real_stages` (Fase 4).
+        app.state.extractor = document_extractor
 
         # Supone un único proceso: nada activo puede seguir vivo tras el arranque.
         await recover_interrupted_generations(generations_repo)

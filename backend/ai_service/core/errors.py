@@ -83,6 +83,13 @@ class LlmContextLengthError(LlmError):
     default_message = "El prompt supera el límite de contexto del modelo."
 
 
+class DocumentExtractionError(AppError):
+    """Fallo al extraer texto del archivo. Lo lanzan los adaptadores; P1 lo captura."""
+
+    code = "DOCUMENT_UNREADABLE"
+    default_message = "No se pudo extraer el texto del documento."
+
+
 class InvalidStateTransition(Exception):
     """Una actualización con guarda de estado no afectó ninguna fila. Error interno."""
 
