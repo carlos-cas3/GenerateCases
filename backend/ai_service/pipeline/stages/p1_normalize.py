@@ -1,4 +1,4 @@
-"""P1 — Normalización de historias de usuario. Fase 1: stub simulado."""
+"""P1 — Procesamiento, segmentación y estructuración de HU. Fase 1: stub simulado."""
 
 from typing import ClassVar
 

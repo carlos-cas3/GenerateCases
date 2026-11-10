@@ -1,13 +1,13 @@
 """Eventos internos de progreso del pipeline (no son mensajes HTTP)."""
 
 from datetime import datetime
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_service.core.time import utc_now
-from ai_service.schemas.generations import StageKey
+from ai_service.schemas.generations import LlmRun, StageKey, StageWarning
 
 
 class _Event(BaseModel):
@@ -25,6 +25,9 @@ class StageStarted(_Event):
 class StageCompleted(_Event):
     type: Literal["stage_completed"] = "stage_completed"
     stage_key: StageKey
+    warnings: tuple[StageWarning, ...] = ()
+    llm_runs: tuple[LlmRun, ...] = ()
+    runtime_info: dict[str, Any] | None = None
 
 
 class StageSkipped(_Event):
@@ -36,6 +39,7 @@ class StageFailed(_Event):
     type: Literal["stage_failed"] = "stage_failed"
     stage_key: StageKey
     error_message: str
+    error_code: str
 
 
 class PipelineCompleted(_Event):

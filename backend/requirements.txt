@@ -5,11 +5,22 @@ pydantic>=2.7,<3.0
 pydantic-settings>=2.3
 supabase>=2.10,<3.0
 python-multipart>=0.0.9
+# Cliente LLM (P2/P6). Solo se importa la librería del proveedor activo.
+openai>=1.40,<3.0
+anthropic>=0.34,<1.0
+httpx>=0.27  # también lo usa el adaptador de Ollama
+# Extracción de texto (P1). TXT solo usa stdlib.
+pdfplumber>=0.11,<1.0
+python-docx>=1.1,<2.0
+# Embeddings (P3) y clustering (P4). Solo se importa la librería del proveedor/algoritmo activo.
+# sentence-transformers instala torch (pesado); el modelo se descarga la primera vez.
+sentence-transformers>=3.0,<6.0
+hdbscan>=0.8.33
+numpy>=1.26
 
 # Tests
 pytest>=8.2
 pytest-asyncio>=0.23
-httpx>=0.27
 pyyaml>=6.0
 jsonschema>=4.22
 rfc3339-validator>=0.1.4

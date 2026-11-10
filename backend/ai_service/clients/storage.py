@@ -1,12 +1,9 @@
-"""Almacenamiento de los archivos subidos (bucket privado de Supabase Storage)."""
+"""Puerto de almacenamiento de archivos — contrato y utilidades, sin infraestructura."""
 
-import asyncio
 import re
 import unicodedata
 from typing import Protocol
 from uuid import UUID
-
-from supabase import Client
 
 CONTENT_TYPE_BY_EXTENSION: dict[str, str] = {
     "txt": "text/plain",
@@ -23,6 +20,10 @@ class DocumentStorage(Protocol):
 
     async def upload(self, *, document_id: UUID, filename: str, content_type: str, data: bytes) -> str:
         """Guarda el archivo y devuelve su `storage_path`."""
+        ...
+
+    async def download(self, storage_path: str) -> bytes:
+        """Devuelve los bytes del objeto. Lanza `StoredDocumentUnavailable` si no se puede leer."""
         ...
 
     async def remove(self, storage_path: str) -> None:
@@ -44,23 +45,3 @@ def sanitize_filename(filename: str) -> str:
 
 def build_storage_path(document_id: UUID, filename: str) -> str:
     return f"{document_id}/{sanitize_filename(filename)}"
-
-
-class SupabaseDocumentStorage:
-    """Implementación sobre Supabase Storage. El cliente síncrono se ejecuta en un hilo."""
-
-    def __init__(self, client: Client, bucket: str) -> None:
-        self._client = client
-        self._bucket = bucket
-
-    async def upload(self, *, document_id: UUID, filename: str, content_type: str, data: bytes) -> str:
-        storage_path = build_storage_path(document_id, filename)
-        await asyncio.to_thread(
-            lambda: self._client.storage.from_(self._bucket).upload(
-                storage_path, data, {"content-type": content_type, "upsert": "false"}
-            )
-        )
-        return storage_path
-
-    async def remove(self, storage_path: str) -> None:
-        await asyncio.to_thread(lambda: self._client.storage.from_(self._bucket).remove([storage_path]))

@@ -10,6 +10,8 @@ Tabla de transiciones aplicada (pipeline-orchestration.md §5):
 | stage_skipped      | pending → skipped        | —                                            |
 | stage_failed       | running → failed + error | —                                            |
 | pipeline_completed | —                        | running → completed (si 7 etapas finales ok) |
+
+Una etapa no bloqueante (P7) puede quedar `failed` en una generación `completed` (D-33).
 | pipeline_failed    | —                        | queued|running → failed + error, completed_at|
 """
 
@@ -19,6 +21,7 @@ from uuid import UUID
 
 from ai_service.core.errors import InvalidStateTransition
 from ai_service.core.time import utc_now
+from ai_service.pipeline.catalog import get_stage_definition
 from ai_service.pipeline.context import PipelineContext
 from ai_service.pipeline.events import (
     PipelineCompleted,
@@ -29,7 +32,7 @@ from ai_service.pipeline.events import (
     StageSkipped,
     StageStarted,
 )
-from ai_service.pipeline.orchestrator import PipelineOrchestrator
+from ai_service.pipeline.orchestrator import INTERNAL_STAGE_ERROR_CODE, PipelineOrchestrator
 from ai_service.pipeline.stages.base import StageBase
 from ai_service.repositories.generations import GenerationsRepository
 from ai_service.schemas.generations import (
@@ -43,6 +46,7 @@ logger = logging.getLogger(__name__)
 INTERNAL_FAILURE_MESSAGE = "La generación falló por un error interno."
 INTERNAL_STAGE_FAILURE_MESSAGE = "La etapa se interrumpió por un error interno."
 INTERRUPTED_MESSAGE = "Ejecución interrumpida por reinicio del servicio."
+INTERRUPTED_CODE = "INTERRUPTED"
 
 _FINAL_STAGE_STATUSES = frozenset({StageStatus.COMPLETED, StageStatus.SKIPPED})
 
@@ -66,7 +70,8 @@ class RepositoryProgressReporter:
             case StageCompleted():
                 await repo.update_stage(
                     gid, event.stage_key, expected=StageStatus.RUNNING, status=StageStatus.COMPLETED,
-                    completed_at=event.occurred_at,
+                    completed_at=event.occurred_at, warnings=event.warnings, llm_runs=event.llm_runs,
+                    runtime_info=event.runtime_info,
                 )
             case StageSkipped():
                 await repo.update_stage(
@@ -77,6 +82,7 @@ class RepositoryProgressReporter:
                 await repo.update_stage(
                     gid, event.stage_key, expected=StageStatus.RUNNING, status=StageStatus.FAILED,
                     completed_at=event.occurred_at, error_message=event.error_message,
+                    error_code=event.error_code,
                 )
             case PipelineCompleted():
                 await self._ensure_all_stages_final()
@@ -91,11 +97,19 @@ class RepositoryProgressReporter:
                 )
 
     async def _ensure_all_stages_final(self) -> None:
-        """Una generación solo se completa si sus 7 etapas están `completed` o `skipped`."""
+        """Una generación solo se completa si sus 7 etapas están `completed` o `skipped`.
+
+        Excepción: una etapa no bloqueante (P7) también puede estar `failed`.
+        """
         record = await self._repository.get_by_id(self._generation_id)
         if record is None:
             raise InvalidStateTransition(f"generation {self._generation_id} no existe")
-        pending = [s.stage_key.value for s in record.stages if s.status not in _FINAL_STAGE_STATUSES]
+        pending = [
+            s.stage_key.value
+            for s in record.stages
+            if s.status not in _FINAL_STAGE_STATUSES
+            and not (s.status == StageStatus.FAILED and not get_stage_definition(s.stage_key).blocking)
+        ]
         if len(record.stages) != 7 or pending:
             raise InvalidStateTransition(f"generation {self._generation_id}: etapas no finales {pending}")
 
@@ -136,6 +150,7 @@ class PipelineRunService:
                     await self._repository.update_stage(
                         generation_id, stage.stage_key, expected=StageStatus.RUNNING, status=StageStatus.FAILED,
                         completed_at=now, error_message=INTERNAL_STAGE_FAILURE_MESSAGE,
+                        error_code=INTERNAL_STAGE_ERROR_CODE,
                     )
             await self._repository.update_generation_status(
                 generation_id, expected=ACTIVE_GENERATION_STATUSES, status=GenerationStatus.FAILED,
@@ -148,7 +163,9 @@ class PipelineRunService:
 
 async def recover_interrupted_generations(repository: GenerationsRepository) -> list[UUID]:
     """Recuperación de arranque: asume un único proceso, así que ninguna ejecución activa sigue viva."""
-    interrupted = await repository.mark_interrupted(message=INTERRUPTED_MESSAGE, at=utc_now())
+    interrupted = await repository.mark_interrupted(
+        message=INTERRUPTED_MESSAGE, code=INTERRUPTED_CODE, at=utc_now()
+    )
     for generation_id in interrupted:
         logger.warning("Generación interrumpida marcada como failed generation_id=%s", generation_id)
     return interrupted

@@ -1,6 +1,6 @@
 """Etapas P1–P7 y su construcción a partir de la configuración."""
 
-from ai_service.pipeline.stages.base import StageBase, StubStage
+from ai_service.pipeline.stages.base import StageBase, StageError, StageResult, StubStage
 from ai_service.pipeline.stages.p1_normalize import NormalizeStage
 from ai_service.pipeline.stages.p2_requirements import RequirementsStage
 from ai_service.pipeline.stages.p3_embeddings import EmbeddingsStage
@@ -25,4 +25,4 @@ def build_stub_stages(delay_seconds: float, fail_at_stage: str | None = None) ->
     return [cls(delay_seconds, fail=cls.key.value == fail_at_stage) for cls in STUB_STAGE_CLASSES]
 
 
-__all__ = ["StageBase", "StubStage", "build_stub_stages", "STUB_STAGE_CLASSES"]
+__all__ = ["StageBase", "StageError", "StageResult", "StubStage", "build_stub_stages", "STUB_STAGE_CLASSES"]

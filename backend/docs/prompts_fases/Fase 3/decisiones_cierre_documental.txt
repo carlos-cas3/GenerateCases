@@ -1,0 +1,26 @@
+# Decisiones a revisar para poder resolver inconsistencias
+
+
+1. D-36: opción (a). Si P4 no deja ningún RF en un cluster, P5 termina completed con un
+   aviso (por ejemplo INSUFFICIENT_CONTEXT) y 0 unidades; P6 y P7 quedan skipped; la
+   generación termina completed. No es un fallo. Ajusta el contrato para permitir cero
+   unidades y elimina el EMPTY_CONTEXT en este caso.
+2. D-26: test_data solo con inputs y notes. preconditions y expected_result quedan como
+   campos de primer nivel del caso.
+3. P7: requirement_coverage cuenta solo validated; proposed_requirement_coverage aparte.
+   Lista v1 como la propones. unassigned_ratio solo con clustering habilitado (define su
+   valor cuando no aplica). Regístralo como D-37 con formula_version = v1.
+4. D-18: [elegir una]
+   - Diferir (retirar link_support_threshold del contrato P6), o
+   - Implementar con umbral configurable, nota informativa que no bloquea, y versión de la
+     fórmula registrada. Antes de implementar, propón cómo se calcula el puntaje.
+5. StageError: corregir el diseño, no el código. La etapa la aporta el orquestador.
+6. Los 11 supuestos: preséntalos en una tabla (supuesto, motivo, riesgo si es incorrecto)
+   para mi revisión. El punto 11 queda pendiente según D-26.
+
+Además, abre decisiones o tareas para: idempotencia de las RPC, HU duplicadas en
+persist_p2_requirements, la referencia a requirements(id) en la documentación y la
+migración de position.
+
+Procede con el plan de cierre documental. Los cambios en contratos y tests van como un
+cambio separado, después.

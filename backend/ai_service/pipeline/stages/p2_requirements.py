@@ -1,4 +1,4 @@
-"""P2 — Extracción de requisitos funcionales. Fase 1: stub simulado."""
+"""P2 — Clasificación de HU y extracción de RF. Fase 1: stub simulado."""
 
 from typing import ClassVar
 
