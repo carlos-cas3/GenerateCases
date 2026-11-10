@@ -378,6 +378,30 @@ $$;
 -- `id` dentro de la generación; un código inexistente aborta todo (23503).
 -- -----------------------------------------------------------------------------
 
+-- P1: historias de usuario (user_stories). Idempotente por (generation_id, code) — T-01.
+-- p_payload = [{ "id"?, "code", "position", "original_text", "role"?, "action"?, "goal"?, "validation_status" }]
+create or replace function public.persist_p1_user_stories(
+    p_generation_id uuid,
+    p_payload       jsonb
+) returns void
+language plpgsql
+set search_path = public
+as $$
+begin
+    insert into public.user_stories (id, generation_id, code, position, original_text, role, action, goal, validation_status)
+    select coalesce(s.id, gen_random_uuid()), p_generation_id, s.code, s.position, s.original_text, s.role, s.action, s.goal, s.validation_status
+    from jsonb_to_recordset(coalesce(p_payload, '[]'::jsonb))
+         as s(id uuid, code text, position integer, original_text text, role text, action text, goal text, validation_status text)
+    on conflict (generation_id, code) do update
+        set position          = excluded.position,
+            original_text     = excluded.original_text,
+            role              = excluded.role,
+            action            = excluded.action,
+            goal              = excluded.goal,
+            validation_status = excluded.validation_status;
+end;
+$$;
+
 -- P2: clasificación de HU + RF + user_story_requirements.
 -- p_payload = {
 --   "classifications": [{ "user_story_code", "classification", "classification_rationale", "clarification_items": [] }],
@@ -395,6 +419,17 @@ declare
     v_updated  integer;
     v_missing  text;
 begin
+    -- T-02: rechazar user_story_code duplicados en el payload con un mensaje claro.
+    select c.user_story_code into v_missing
+    from jsonb_to_recordset(coalesce(p_payload -> 'classifications', '[]'::jsonb)) as c(user_story_code text)
+    group by c.user_story_code
+    having count(*) > 1
+    limit 1;
+    if found then
+        raise exception 'persist_p2_requirements: la HU % aparece 2 o más veces en el payload', v_missing
+            using errcode = '23505';
+    end if;
+
     v_expected := jsonb_array_length(coalesce(p_payload -> 'classifications', '[]'::jsonb));
 
     update public.user_stories us
@@ -415,7 +450,10 @@ begin
     insert into public.functional_requirements (id, generation_id, code, description, source_text)
     select coalesce(r.id, gen_random_uuid()), p_generation_id, r.code, r.description, r.source_text
     from jsonb_to_recordset(coalesce(p_payload -> 'requirements', '[]'::jsonb))
-         as r(id uuid, code text, description text, source_text text);
+         as r(id uuid, code text, description text, source_text text)
+    on conflict (generation_id, code) do update           -- T-01: idempotencia por clave
+        set description = excluded.description,
+            source_text  = excluded.source_text;
 
     select l.user_story_code into v_missing
     from jsonb_to_recordset(coalesce(p_payload -> 'requirements', '[]'::jsonb))
@@ -439,7 +477,8 @@ begin
          join public.functional_requirements fr
              on fr.generation_id = p_generation_id and fr.code = r.code
          join public.user_stories us
-             on us.generation_id = p_generation_id and us.code = l.user_story_code;
+             on us.generation_id = p_generation_id and us.code = l.user_story_code
+    on conflict (generation_id, user_story_id, requirement_id) do nothing;  -- T-01
 end;
 $$;
 
@@ -470,7 +509,11 @@ begin
     insert into public.clusters (id, generation_id, name, description, cluster_label)
     select c.id, p_generation_id, c.name, c.description, c.cluster_label
     from jsonb_to_recordset(coalesce(p_payload -> 'clusters', '[]'::jsonb))
-         as c(id uuid, name text, description text, cluster_label integer);
+         as c(id uuid, name text, description text, cluster_label integer)
+    on conflict (id) do update                              -- T-01: idempotencia por clave
+        set name           = excluded.name,
+            description    = excluded.description,
+            cluster_label  = excluded.cluster_label;
 
     with codes as (
         select a.requirement_code as code
@@ -497,13 +540,15 @@ begin
          cross join lateral jsonb_to_recordset(coalesce(c.assignments, '[]'::jsonb))
              as a(requirement_code text, similarity_to_centroid double precision)
          join public.functional_requirements fr
-             on fr.generation_id = p_generation_id and fr.code = a.requirement_code;
+             on fr.generation_id = p_generation_id and fr.code = a.requirement_code
+    on conflict (generation_id, cluster_id, requirement_id) do nothing;  -- T-01
 
     insert into public.unassigned_requirements (generation_id, requirement_id)
     select distinct p_generation_id, fr.id
     from jsonb_array_elements_text(coalesce(p_payload -> 'unassigned_requirement_codes', '[]'::jsonb)) as u(code)
          join public.functional_requirements fr
-             on fr.generation_id = p_generation_id and fr.code = u.code;
+             on fr.generation_id = p_generation_id and fr.code = u.code
+    on conflict (generation_id, requirement_id) do nothing;  -- T-01
 end;
 $$;
 
@@ -550,30 +595,40 @@ begin
     select t.id, p_generation_id, t.code, t.title, t.objective,
            coalesce(t.preconditions, '[]'::jsonb), t.test_data, t.expected_result
     from jsonb_to_recordset(coalesce(p_payload -> 'test_cases', '[]'::jsonb))
-         as t(id uuid, code text, title text, objective text, preconditions jsonb, test_data jsonb, expected_result text);
+         as t(id uuid, code text, title text, objective text, preconditions jsonb, test_data jsonb, expected_result text)
+    on conflict (generation_id, code) do update            -- T-01: idempotencia por clave
+        set title           = excluded.title,
+            objective       = excluded.objective,
+            preconditions   = excluded.preconditions,
+            test_data       = excluded.test_data,
+            expected_result = excluded.expected_result;
 
     insert into public.test_steps (generation_id, test_case_id, step_number, action, expected_result)
     select p_generation_id, t.id, s.step_number, s.action, s.expected_result
     from jsonb_to_recordset(coalesce(p_payload -> 'test_cases', '[]'::jsonb)) as t(id uuid, steps jsonb)
          cross join lateral jsonb_to_recordset(coalesce(t.steps, '[]'::jsonb))
-             as s(step_number integer, action text, expected_result text);
+             as s(step_number integer, action text, expected_result text)
+    on conflict (test_case_id, step_number) do nothing;  -- T-01
 
     insert into public.requirement_test_cases (generation_id, requirement_id, test_case_id)
     select distinct p_generation_id, fr.id, t.id
     from jsonb_to_recordset(coalesce(p_payload -> 'test_cases', '[]'::jsonb)) as t(id uuid, requirement_codes jsonb)
          cross join lateral jsonb_array_elements_text(coalesce(t.requirement_codes, '[]'::jsonb)) as l(code)
          join public.functional_requirements fr
-             on fr.generation_id = p_generation_id and fr.code = l.code;
+             on fr.generation_id = p_generation_id and fr.code = l.code
+    on conflict (generation_id, requirement_id, test_case_id) do nothing;  -- T-01
 end;
 $$;
 
 revoke execute on function public.create_generation(uuid, boolean, text, jsonb) from public, anon, authenticated;
 revoke execute on function public.delete_generation_if_final(uuid) from public, anon, authenticated;
+revoke execute on function public.persist_p1_user_stories(uuid, jsonb) from public, anon, authenticated;
 revoke execute on function public.persist_p2_requirements(uuid, jsonb) from public, anon, authenticated;
 revoke execute on function public.persist_p4_clusters(uuid, jsonb) from public, anon, authenticated;
 revoke execute on function public.persist_p6_unit(uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.create_generation(uuid, boolean, text, jsonb) to service_role;
 grant execute on function public.delete_generation_if_final(uuid) to service_role;
+grant execute on function public.persist_p1_user_stories(uuid, jsonb) to service_role;
 grant execute on function public.persist_p2_requirements(uuid, jsonb) to service_role;
 grant execute on function public.persist_p4_clusters(uuid, jsonb) to service_role;
 grant execute on function public.persist_p6_unit(uuid, jsonb) to service_role;

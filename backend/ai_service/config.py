@@ -1,5 +1,6 @@
 """Configuración de la aplicación a partir de variables de entorno."""
 
+import re
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -40,6 +41,18 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None  # obligatoria para openai y anthropic
     llm_base_url: str | None = None  # obligatoria para ollama; opcional (proxy) para el resto
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
+    llm_model: str | None = None  # nombre del modelo concreto para P2/P6 (LlmSettings.model)
+
+    # Configuración de P1 (camino B: heurística, sin LLM). Ver plantilla_hu.md (T-F4-02).
+    p1_rules_version: str = Field(default="v1", min_length=1)
+    p1_language: str = Field(default="es", min_length=1)
+    p1_story_delimiter_pattern: str = Field(default=r"^##\s+.+$", min_length=1)
+    p1_max_story_chars: int = Field(default=5000, gt=0)
+
+    # Configuración de P2 (LLM en batches). Ver prompt_p2.md (T-F4-03).
+    p2_prompt_version: str = Field(default="v1", min_length=1)
+    p2_max_stories_per_call: int = Field(default=5, gt=0)
+    p2_max_retries: int = Field(default=2, ge=0)
 
     # Embeddings de P3 y clustering de P4 (ver issue_resolver_embeddings.md). La coherencia
     # proveedor ↔ credenciales la comprueba `EmbeddingsClientFactory` en el arranque.
@@ -49,12 +62,22 @@ class Settings(BaseSettings):
     embeddings_timeout_seconds: float = Field(default=60.0, gt=0)  # solo proveedores remotos
     clustering_algorithm: ClusteringAlgorithmLiteral = "hdbscan"
 
-    @field_validator("pipeline_stub_fail_at_stage", "llm_base_url", mode="before")
+    @field_validator("pipeline_stub_fail_at_stage", "llm_base_url", "llm_model", mode="before")
     @classmethod
     def _empty_as_none(cls, value: object) -> object:
         """Permite dejar la variable vacía en `.env` (fallo simulado desactivado, sin URL base)."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("p1_story_delimiter_pattern")
+    @classmethod
+    def _valid_regex(cls, value: str) -> str:
+        """Valida que el delimitador de HU sea una expresión regular compilable."""
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError(f"P1_STORY_DELIMITER_PATTERN es una regex inválida: {exc}") from exc
         return value
 
     @field_validator("llm_api_key", "embeddings_api_key", mode="before")
