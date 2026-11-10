@@ -47,7 +47,8 @@ info:
       anteriores al fallo, incluidos casos de prueba de las unidades de P6 que terminaron
       antes de que otra fallara (D-15): `failed` no implica cero resultados.
     - **Orden de los listados:** las historias de usuario se ordenan por `position` (orden de
-      aparición en el documento).
+      aparición en el documento). Las filas sin `position` (generaciones previas a la Fase 3)
+      se ordenan al final por `code`.
     - **Paginación:** `limit` (1–100, por defecto 20) y `offset`.
     - **Errores:** formato común `{ "error": { "code", "message", "details" } }`.
     - **Etapas:** si una etapa P1–P6 falla, queda en `failed` con `error_code` y
