@@ -157,13 +157,14 @@ class LlmSettings(ContractModel):
 class TestData(ContractModel):
     """`test_cases.test_data` (D-26, esquema `TestData` del openapi). Todas las claves son opcionales.
 
+    Solo `inputs` y `notes`: `preconditions` y `expected_result` son campos de primer
+    nivel del caso (`TestCaseDraft`, `TestCase`).
+
     Lo produce P6 (vía `TestCaseDraft`) y se persiste con `persist_p6_unit`.
     """
 
     __test__ = False  # no es una clase de pytest
 
-    preconditions: tuple[str, ...] = ()
     # dict: `frozen` no lo hace inmutable por dentro.
     inputs: dict[str, Any] = Field(default_factory=dict)
-    expected_results: tuple[str, ...] = ()
     notes: str | None = None

@@ -171,7 +171,6 @@ class P6Config(ContractModel):
     llm: LlmSettings
     max_retries: int = Field(ge=0)
     on_unit_failure: Literal["fail"] = "fail"
-    link_support_threshold: float | None = Field(default=None, ge=0, le=1)
 
 
 class P6Input(ContractModel):

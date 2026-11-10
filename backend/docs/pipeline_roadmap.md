@@ -161,7 +161,9 @@ corre siempre al final del pipeline.
 - Contratos P1–P6 completos con validaciones cruzadas (312 pruebas)
 - `to_rpc_payload()` en P2, P4 y P6
 - Prompts de P6 (2 variantes)
-- `PipelineContext` con campos de output por etapa (`p1_output`…`p5_output`)
+- `PipelineContext` con campos de output por etapa (`p1_output`…`p5_output`) — **T-05 cerrada**
+- `TestData` reducido a `inputs` y `notes` (D-26) y `link_support_threshold` retirado de `P6Config` (D-18)
+- Pendientes para el inicio de la Fase 4: decisiones de `schema.sql` T-01, T-02 y T-04 (ver `prompts_fases/Fase 3/tareas_pendientes_final_fase3.md`)
 - Patrones verificados: Pipeline, Strategy, Dependency Injection, Adapter
 
 ### 🔲 Fase 4 — Implementación de P1 y P2 (LLM)

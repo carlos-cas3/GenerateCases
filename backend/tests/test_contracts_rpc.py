@@ -119,8 +119,7 @@ def test_p6_payload_shape() -> None:
     case = f.unit_output().to_rpc_payload()["test_cases"][0]
     assert case["id"] == str(f.CP1_ID)
     assert case["preconditions"] == ["El usuario está registrado"]
-    assert case["test_data"] == {"preconditions": [], "inputs": {"email": "usuario@ejemplo.com"},
-                                 "expected_results": [], "notes": None}
+    assert case["test_data"] == {"inputs": {"email": "usuario@ejemplo.com"}, "notes": None}
     assert [step["step_number"] for step in case["steps"]] == [1, 2]
     assert case["requirement_codes"] == ["RF-001"]
     assert "requirement_links" not in case

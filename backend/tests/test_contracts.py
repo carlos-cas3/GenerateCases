@@ -112,7 +112,7 @@ def test_openapi_test_data_example_is_a_valid_test_data() -> None:
 def test_test_data_contract_matches_openapi_schema() -> None:
     schema = _openapi_schema("TestData")
     assert set(common.TestData.model_fields) == set(schema["properties"])
-    full = common.TestData(preconditions=("a",), inputs={"k": "v"}, expected_results=("b",), notes="n")
+    full = common.TestData(inputs={"k": "v"}, notes="n")
     Draft202012Validator(schema).validate(full.model_dump(mode="json"))
 
 

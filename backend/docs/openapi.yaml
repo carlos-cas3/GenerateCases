@@ -1269,19 +1269,14 @@ components:
       type: object
       description: |
         Estructura de `test_cases.test_data` (D-26). Todas las claves son opcionales; P6 trata
-        una clave desconocida como `LLM_INVALID_OUTPUT`.
+        una clave desconocida como `LLM_INVALID_OUTPUT`. `preconditions` y `expected_result`
+        no van aquí: son campos de primer nivel del caso de prueba.
       additionalProperties: false
       properties:
-        preconditions:
-          type: array
-          items: { type: string }
         inputs:
           type: object
           description: Datos de entrada clave-valor.
           additionalProperties: true
-        expected_results:
-          type: array
-          items: { type: string }
         notes: { type: [string, "null"] }
     TestCaseList:
       type: object

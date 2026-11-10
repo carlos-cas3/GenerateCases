@@ -75,7 +75,7 @@ Vienen de la sección "Decisiones que tomé por ambigüedad" de `resultados_pipe
 | **T-02** | HU duplicadas en `persist_p2_requirements` | Si `classifications` trae el mismo `user_story_code` dos veces, el `UPDATE … FROM` actualiza la fila una sola vez y el conteo no cuadra. La RPC lanza "N clasificaciones apuntan a HU inexistentes", un mensaje engañoso. El contrato `P2Output` ya impide duplicados, pero la RPC no se protege sola. | Rechazar los duplicados explícitamente en la RPC con un mensaje correcto (recomendado), o contar `distinct user_story_code`. Añadir un test RPC. |
 | **T-03** | Referencia a `requirements(id)` en la documentación | `decisiones_pipeline.md` decía `REFERENCES requirements(id)`; la tabla real es `functional_requirements` con FK compuesta `(generation_id, id)`. | **Hecho en este cierre.** Queda revisar que no se repita en otros documentos fuera de `Fase 3/`. |
 | **T-04** | Migración de `position` en `user_stories` | La migración aditiva (`schema.sql`, sección 5) añade `position` nullable y `unique (generation_id, position)`, pero no rellena las filas existentes. Las HU antiguas quedan con `position = null` y los listados que ordenan por `position` las devuelven en orden indefinido. | Definir el backfill (por ejemplo `row_number()` por generación, ordenando por el número de `code`) y decidir si después la columna pasa a `NOT NULL`. Documentar en el openapi cómo se ordenan las filas sin `position`. |
-| **T-05** | Paso de datos entre etapas | Propuesta de `resultados_pipeline.md` (no implementada): añadir a `PipelineContext` un campo opcional por etapa (`p1: P1Output | None`, …). | Confirmar o descartar antes de implementar la lógica de las etapas. |
+| **T-05** | Paso de datos entre etapas | **Cerrada.** `PipelineContext` (`ai_service/pipeline/context.py`) tiene un campo opcional por etapa: `p1_output` … `p5_output`. | Nada. |
 
 ---
 
@@ -84,7 +84,7 @@ Vienen de la sección "Decisiones que tomé por ambigüedad" de `resultados_pipe
 - Supuestos 1–10 de la sección 2: pendientes de revisión del responsable.
 - Supuesto 11: pendiente según D-26.
 - D-38 y D-39 quedan cerradas (handoff `actualización_decisiones_incosistencia.md`).
-- T-01, T-02, T-04 y T-05. T-05 sigue abierta y bloquea la implementación real de P5 (loteo de RF) y P6 (uso del prompt resuelto).
+- T-01, T-02 y T-04: se deciden al iniciar la Fase 4 (ver `tareas_pendientes_final_fase3.md`, sección 4). T-05 está cerrada.
 - Recomendaciones de `decisiones_pipeline.md` marcadas como "Recomendado" que siguen sin confirmar.
 
 ---
@@ -96,12 +96,12 @@ No incluido en este cierre. Lista de lo que debe cambiar para alinear el código
 | Archivo | Cambio | Decisión |
 |---|---|---|
 | `ai_service/pipeline/contracts/p5.py` | `units` vacía solo con `by_cluster`; `by_user_story` exige ≥ 1 unidad y sin `context_requirements`. **Hecho.** | D-36, D-39 |
-| `ai_service/pipeline/contracts/common.py` | `TestData` solo con `inputs` y `notes`. | D-26 |
+| `ai_service/pipeline/contracts/common.py` | `TestData` solo con `inputs` y `notes`. **Hecho.** | D-26 |
 | `ai_service/pipeline/contracts/p6.py` | Documentar `prompt_version` como familia; la variante se resuelve por `strategy`. **Hecho.** | D-38 |
-| `ai_service/pipeline/contracts/p6.py` | Quitar `link_support_threshold` de `P6Config`. | D-18 |
+| `ai_service/pipeline/contracts/p6.py` | Quitar `link_support_threshold` de `P6Config`. **Hecho.** | D-18 |
 | `ai_service/pipeline/prompts/` (nuevo) | Resolvedor `contexto` / `contexto_sin_clustering`. **Hecho.** | D-38 |
 | `ai_service/pipeline/contracts/p7.py` (nuevo) | `P7Input` / `P7Output` con las métricas de D-37 y `formula_version`. | D-37 |
-| Orquestador / P5 | `INSUFFICIENT_CONTEXT` y `skip_remaining` solo en D-36 (clustering sin RF asignados); sin clustering con 0 unidades → `EMPTY_CONTEXT`. Bloqueado por T-05. | D-36, D-39 |
-| `docs/openapi.yaml` | Documentar D-36, la variante de prompt y el `skipped` sin clustering (**hecho**). Pendiente: esquema `TestData` solo con `inputs` y `notes`; métricas de P7 v1. | D-26, D-36, D-37, D-38 |
-| `tests/` | Pruebas de `units` por estrategia y del resolvedor de prompts (**hecho**). Pendiente: `TestData` reducido, sin `link_support_threshold`, contratos de P7 y compatibilidad con el openapi. | Todas |
+| Orquestador / P5 | `INSUFFICIENT_CONTEXT` y `skip_remaining` solo en D-36 (clustering sin RF asignados); sin clustering con 0 unidades → `EMPTY_CONTEXT`. Contrato alineado; la lógica se implementa en la Fase 6. | D-36, D-39 |
+| `docs/openapi.yaml` | Documentar D-36, la variante de prompt y el `skipped` sin clustering (**hecho**). Esquema `TestData` solo con `inputs` y `notes` (**hecho**). Pendiente: métricas de P7 v1 (cuando se desarrolle P7). | D-26, D-36, D-37, D-38 |
+| `tests/` | Pruebas de `units` por estrategia y del resolvedor de prompts (**hecho**). `TestData` reducido y sin `link_support_threshold` (**hecho**). Pendiente: contratos de P7. | Todas |
 | `supabase/schema.sql` | Según lo que se decida en T-01, T-02 y T-04. | T-01, T-02, T-04 |
