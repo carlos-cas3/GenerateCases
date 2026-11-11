@@ -7,7 +7,7 @@
 
 ## Resumen ejecutivo
 
-El pipeline tiene **7 etapas** (P1–P7). La infraestructura de orquestación está **completamente terminada**, la capa de contratos (P1–P6) está **completamente definida y con pruebas**, y `PipelineContext` ya transporta los outputs entre etapas. Ninguna etapa tiene lógica real aún: todas son **stubs simulados**. El proyecto está listo para iniciar la **Fase 4 — implementación real de las etapas**.
+El pipeline tiene **7 etapas** (P1–P7). La infraestructura de orquestación está **completamente terminada**, la capa de contratos (P1–P6) está **completamente definida y con pruebas**, y `PipelineContext` ya transporta los outputs entre etapas. Desde la **Fase 4**, **P1** (segmentación heurística, sin LLM) y **P2** (clasificación + extracción de RF con LLM en lotes) tienen lógica real y persisten HU/RF en Supabase; **P3–P7 siguen como stubs simulados**. `PIPELINE_STAGES=stub` mantiene las siete etapas simuladas. Siguiente: **Fase 5 — P3 y P4**.
 
 ---
 
@@ -49,8 +49,8 @@ POST /api/v1/generations
 
 | # | Clave | Nombre | Bloqueante | Contrato | Stage impl. | Prompts |
 |---|---|---|---|---|---|---|
-| 1 | `p1` | Procesamiento, segmentación y estructuración de HU | ✅ sí | ✅ completo | 🔴 stub | ❌ falta |
-| 2 | `p2` | Clasificación de HU y extracción de RF | ✅ sí | ✅ completo | 🔴 stub | ❌ falta |
+| 1 | `p1` | Procesamiento, segmentación y estructuración de HU | ✅ sí | ✅ completo | ✅ real (heurística) | — (sin LLM; `plantilla_hu.md`) |
+| 2 | `p2` | Clasificación de HU y extracción de RF | ✅ sí | ✅ completo | ✅ real (LLM en lotes) | ✅ completo |
 | 3 | `p3` | Generación de embeddings | ✅ sí | ✅ completo | 🔴 stub | — (sin LLM) |
 | 4 | `p4` | Clustering semántico | ✅ sí | ✅ completo | 🔴 stub | — (sin LLM) |
 | 5 | `p5` | Construcción de contexto estructurado | ✅ sí | ✅ completo | 🔴 stub | — (sin LLM) |
@@ -138,8 +138,8 @@ corre siempre al final del pipeline.
 | `prompts/p6.py` | ✅ completo | `resolve_p6_prompt(prompt_version, strategy)` — selecciona variante por `UnitStrategy` |
 | `prompts/texts/contexto.md` | ✅ completo | Prompt P6 con clustering (`by_cluster`) |
 | `prompts/texts/contexto_sin_clustering.md` | ✅ completo | Prompt P6 sin clustering (`by_user_story`) |
-| `prompts/p1.py` + texto | ❌ falta | Se desarrolla en Fase 4 |
-| `prompts/p2.py` + texto | ❌ falta | Se desarrolla en Fase 4 |
+| `prompts/p1.py` + texto | — (sin LLM) | P1 usa heurística (camino B); el formato lo fija `prompts_fases/Fase 4/plantilla_hu.md` |
+| `prompts/p2.py` + `texts/p2_requirements.md` | ✅ completo | `resolve_p2_prompt(prompt_version)` — una variante |
 | `prompts/p7.py` + texto | ⏸ pendiente | Se desarrolla cuando se implemente P7 |
 
 ---
@@ -166,17 +166,18 @@ corre siempre al final del pipeline.
 - Pendientes para el inicio de la Fase 4: decisiones de `schema.sql` T-01, T-02 y T-04 (ver `prompts_fases/Fase 3/tareas_pendientes_final_fase3.md`)
 - Patrones verificados: Pipeline, Strategy, Dependency Injection, Adapter
 
-### 🔲 Fase 4 — Implementación de P1 y P2 (LLM)
-**Prerequisitos:** configuración LLM en `Settings`, prompts de P1 y P2.
+### ✅ Fase 4 — Implementación de P1 (heurística) y P2 (LLM)
+Detalle: `prompts_fases/Fase 4/fase4.md` y `prompts_fases/Fase 4/cierre_documental_fase4.md`.
 
-- [ ] Variables de entorno LLM en `config.py` (proveedor, modelo, API key)
-- [ ] Puerto `LlmClient` (Protocol) para desacoplar P2/P6 de la librería concreta
-- [ ] Puerto `DocumentTextExtractor` (Protocol) para desacoplar P1 del storage
-- [ ] Prompts para P1 (segmentación/normalización)
-- [ ] Prompts para P2 (clasificación + extracción de RF)
-- [ ] Implementar `NormalizeStage.run()` — extrae texto, llama al LLM, valida `P1Output`, persiste HU
-- [ ] Implementar `RequirementsStage.run()` — llama al LLM en batches, valida `P2Output`, llama a `persist_p2_requirements`
-- [ ] RPC `persist_p2_requirements` en el cliente Supabase
+- [x] Variables de entorno LLM y de `P1Config`/`P2Config` en `config.py` (+ `PIPELINE_STAGES`)
+- [x] Puerto `LlmClient` y puerto `DocumentTextExtractor` (hechos en Fase 3)
+- [x] Spec de plantilla de HU (`plantilla_hu.md`) — P1 sin prompt (camino B)
+- [x] Prompt de P2 (`prompts/p2.py` + `texts/p2_requirements.md`)
+- [x] `NormalizeStage.run()` — Storage → extractor → regex/heurística → `P1Output` → `persist_p1_user_stories`
+- [x] `RequirementsStage.run()` — LLM en lotes con reintentos → `P2Output` → `persist_p2_requirements` (D-29)
+- [x] RPC `persist_p1_user_stories` + callers en `PipelineResultsRepository` (Supabase y fake en memoria)
+- [x] Decisiones `schema.sql` T-01, T-02, T-04 (`decisiones_schema.sql.md`)
+- [ ] Desplegar `schema.sql` actualizado contra Supabase (manual)
 
 ### 🔲 Fase 5 — Implementación de P3 y P4 (embeddings + clustering)
 **Prerequisito:** proveedor de embeddings configurado.
@@ -227,3 +228,5 @@ Otros cierres pendientes:
 1. **`dict` en modelos frozen** — Los siguientes campos tienen `dict` que `frozen=True` no hace realmente inmutable: `LlmSettings.parameters`, `TestData.inputs`, `P4Config.params`, `ClusteringAlgorithmInfo.params`, `TestCaseOutputSpec.json_schema`, `ContextUnit.requirement_to_stories`.
 2. **`persist_p6_unit` no guarda `validation_notes`** — Los vínculos RF↔CP se insertan siempre `pending` y sin `validation_notes` (D-18 anotación de soporte no llega a la BD).
 3. **`StageError` sin `stage_key`** — El diseño original preveía un campo `stage_key` en `StageError`, pero la implementación actual no lo incluye.
+4. **`schema.sql` sin desplegar** — `persist_p1_user_stories`, T-01 y T-02 solo existen en el archivo; con `PIPELINE_STAGES=real` contra una BD sin desplegar, P1 falla con `PERSISTENCE_FAILED`.
+5. **Heurística de P1 sensible a "para"** — la declaración se parte en la primera aparición de la palabra "para" (`… quiero un botón para exportar, para …` → objetivo "un botón"). Ver `cierre_documental_fase4.md`.

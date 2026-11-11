@@ -128,6 +128,34 @@ class DocumentExtractionError(AppError):
     default_message = "No se pudo extraer el texto del documento."
 
 
+class PersistenceError(AppError):
+    """Fallo al persistir resultados de una etapa (RPC `persist_pN_*`). Las etapas lo capturan."""
+
+    code = "PERSISTENCE_FAILED"
+    default_message = "No se pudieron guardar los resultados de la etapa."
+
+
+class InvalidReferenceError(PersistenceError):
+    """La RPC rechazó una referencia rota (HU/RF inexistente; errcode `23503`)."""
+
+    code = "INVALID_STORY_REFERENCE"
+    default_message = "Los resultados referencian historias de usuario o requisitos inexistentes."
+
+
+class MissingIdentifierError(PersistenceError):
+    """La RPC rechazó una fila sin un identificador obligatorio (errcode `23502`)."""
+
+    code = "MISSING_IDENTIFIER"
+    default_message = "Los resultados contienen filas sin un identificador obligatorio."
+
+
+class DuplicateEntryError(PersistenceError):
+    """La RPC rechazó entradas duplicadas en el payload (errcode `23505`, T-02)."""
+
+    code = "DUPLICATE_ENTRY"
+    default_message = "Los resultados contienen entradas duplicadas."
+
+
 class InvalidStateTransition(Exception):
     """Una actualización con guarda de estado no afectó ninguna fila. Error interno."""
 

@@ -16,9 +16,10 @@ from ai_service.clients.llm import LlmClient  # puerto
 from ai_service.clients.storage import DocumentStorage  # puerto
 from ai_service.config import Settings, get_settings
 from ai_service.core.logging import configure_logging
-from ai_service.pipeline.stages import build_stub_stages
+from ai_service.pipeline.stages import build_real_stages, build_stub_stages
 from ai_service.repositories.documents import DocumentsRepository  # puerto
 from ai_service.repositories.generations import GenerationsRepository  # puerto
+from ai_service.repositories.pipeline_results import PipelineResultsRepository  # puerto
 from ai_service.services.documents import DocumentsService
 from ai_service.services.generations import GenerationsService
 from ai_service.services.pipeline_runs import PipelineRunService, recover_interrupted_generations
@@ -34,6 +35,7 @@ def create_app(
     generations_repository: GenerationsRepository | None = None,
     documents_repository: DocumentsRepository | None = None,
     documents_storage: DocumentStorage | None = None,
+    pipeline_results_repository: PipelineResultsRepository | None = None,
     llm_client: LlmClient | None = None,
     embeddings_client: EmbeddingsClient | None = None,
     clustering_client: ClusteringClient | None = None,
@@ -44,25 +46,32 @@ def create_app(
     Repositorios, Storage, clientes LLM/embeddings/clustering y extractor se inyectan en
     tests (R-DI-4); si no, se usan Supabase, las factories (`LLM_PROVIDER`,
     `EMBEDDINGS_PROVIDER`, `CLUSTERING_ALGORITHM`) y los extractores TXT/PDF/DOCX reales.
+    `PIPELINE_STAGES` elige entre P1/P2 reales (`real`) o las siete etapas simuladas (`stub`).
     """
     configure_logging()
     app_settings = settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        real_stages = app_settings.pipeline_stages == "real"
         generations_repo = generations_repository
         documents_repo = documents_repository
         storage = documents_storage
-        if generations_repo is None or documents_repo is None or storage is None:
+        results_repo = pipeline_results_repository
+        needs_results = real_stages and results_repo is None
+        if generations_repo is None or documents_repo is None or storage is None or needs_results:
             from ai_service.clients.supabase import create_supabase_client
             from ai_service.clients.supabase_storage import SupabaseDocumentStorage  # adaptador
             from ai_service.repositories.supabase_documents import SupabaseDocumentsRepository  # adaptador
             from ai_service.repositories.supabase_generations import SupabaseGenerationsRepository  # adaptador
+            from ai_service.repositories.supabase_pipeline_results import SupabasePipelineResultsRepository  # adaptador
 
             client = create_supabase_client(app_settings)
             generations_repo = generations_repo or SupabaseGenerationsRepository(client)
             documents_repo = documents_repo or SupabaseDocumentsRepository(client)
             storage = storage or SupabaseDocumentStorage(client, app_settings.documents_bucket)
+            if needs_results:
+                results_repo = SupabasePipelineResultsRepository(client)
 
         # Quien construye, cierra (R-FA-7): solo se registran los clientes de las factories,
         # y en orden inverso, aunque el arranque falle a mitad.
@@ -105,8 +114,8 @@ def create_app(
                     }
                 )
 
-            # Las etapas P1–P6 aún son stubs: estos clientes se exponen para inyectarlos en ellas
-            # al construir `build_real_stages` (Fase 4: P1, P2, P6; Fase 5: P3, P4).
+            # P1 y P2 ya los reciben por constructor (`build_real_stages`); embeddings/clustering
+            # quedan expuestos para P3/P4 (Fase 5) y el LLM para P6 (Fase 7).
             # Nadie más debe leerlos de aquí.
             app.state.llm_client = llm
             app.state.embeddings_client = embeddings
@@ -116,9 +125,20 @@ def create_app(
             # Supone un único proceso: nada activo puede seguir vivo tras el arranque.
             await recover_interrupted_generations(generations_repo)
 
-            stages = build_stub_stages(
-                app_settings.pipeline_stub_delay_seconds, app_settings.pipeline_stub_fail_at_stage
-            )
+            if real_stages:
+                assert results_repo is not None
+                stages = build_real_stages(
+                    app_settings,
+                    documents=documents_repo,
+                    storage=storage,
+                    extractor=document_extractor,
+                    llm_client=llm,
+                    results=results_repo,
+                )
+            else:
+                stages = build_stub_stages(
+                    app_settings.pipeline_stub_delay_seconds, app_settings.pipeline_stub_fail_at_stage
+                )
             app.state.generations_service = GenerationsService(
                 generations=generations_repo,
                 documents=documents_repo,

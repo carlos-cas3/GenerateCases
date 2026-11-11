@@ -123,3 +123,36 @@ def test_p6_payload_shape() -> None:
     assert [step["step_number"] for step in case["steps"]] == [1, 2]
     assert case["requirement_codes"] == ["RF-001"]
     assert "requirement_links" not in case
+
+
+# P1 (Hueco A): el payload es un array de primer nivel (`jsonb_to_recordset(p_payload)`).
+def test_p1_payload_matches_rpc_columns() -> None:
+    payload = f.p1_output().to_rpc_payload()
+    _, record_columns = _rpc_keys("persist_p1_user_stories")
+
+    assert isinstance(payload, list) and payload
+    assert {key for row in payload for key in row} == record_columns
+    assert json.loads(json.dumps(payload)) == payload
+
+
+def test_p1_payload_maps_objective_and_benefit() -> None:
+    story = f.p1_output().user_stories[0]
+    row = f.p1_output().to_rpc_payload()[0]
+
+    assert row["id"] == str(story.id)
+    assert row["code"] == story.code and row["position"] == story.position
+    assert row["action"] == story.objective and row["goal"] == story.benefit  # D-02
+    assert row["validation_status"] == story.validation_status.value
+
+
+def test_persist_p1_is_idempotent_by_code() -> None:
+    body = _function_body("persist_p1_user_stories")
+    assert re.search(r"on conflict \(generation_id, code\) do update", body)
+
+
+def test_persist_p2_rejects_duplicate_stories_before_update() -> None:
+    """T-02: los duplicados se detectan (23505) antes del UPDATE que cuenta filas."""
+    body = _function_body("persist_p2_requirements")
+    duplicate_check = body.index("having count(*) > 1")
+    assert body.index("errcode = '23505'") > duplicate_check
+    assert duplicate_check < body.index("update public.user_stories")

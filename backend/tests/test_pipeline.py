@@ -7,9 +7,8 @@ from ai_service.pipeline.context import PipelineConfiguration, PipelineContext
 from ai_service.pipeline.events import PipelineEvent
 from ai_service.pipeline.orchestrator import PipelineOrchestrator
 from ai_service.pipeline.stages import StageBase, StageError, StageResult, build_stub_stages
-from ai_service.pipeline.stages.p2_requirements import RequirementsStage
 from ai_service.repositories.in_memory import InMemoryGenerationsRepository
-from ai_service.schemas.generations import GenerationStatus, LlmRun, StageStatus, StageWarning
+from ai_service.schemas.generations import GenerationStatus, LlmRun, StageKey, StageStatus, StageWarning
 from ai_service.services.pipeline_runs import INTERNAL_FAILURE_MESSAGE, PipelineRunService
 from tests.conftest import DOCUMENT_ID
 from tests.factories import add_generation
@@ -115,11 +114,12 @@ async def test_run_does_not_reopen_final_generation(store) -> None:
     assert all(s.status == StageStatus.PENDING for s in record.stages)
 
 
-class _P2Without(RequirementsStage):
+class _P2Without(StageBase):
     """P2 que no extrae requisitos (D-29) o que falla con un `StageError` controlado."""
 
+    key = StageKey.P2
+
     def __init__(self, *, error: StageError | None = None) -> None:
-        super().__init__(0)
         self._error = error
 
     async def run(self, context):
