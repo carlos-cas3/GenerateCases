@@ -4,6 +4,8 @@
 > `supabase/schema.sql` contra Supabase (T-01, T-02 y `persist_p1_user_stories`).
 > **Alcance:** T-F4-04 … T-F4-09 + callers (§2 de `guia_implementacion.md`). La base de §1
 > (config, schema, prompts, openapi) se verificó antes de continuar (ver §1).
+> **Prueba local (Ollama):** configuración de `.env` y evidencia en
+> [`prueba_local_ollama.md`](prueba_local_ollama.md).
 
 ---
 
