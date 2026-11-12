@@ -30,6 +30,18 @@ Rellena `rationale` (por qué esa clasificación) y, si aplica, `clarification_i
 Cada RF que extraigas debe venir **solo** de la HU. Hay dos niveles de detalle, según la
 información disponible. **No inventes nada**:
 
+### Atomicidad de los RF (obligatorio)
+
+Cada RF debe describir **un solo** comportamiento o salida comprobable. Si una HU describe dos o
+más comportamientos o salidas independientes, **extráelos como RF separados** (cada uno con su
+propio `description`, `source_text` y `evidence`; pueden citar el mismo fragmento de la HU).
+
+- **Mal** (RF compuesto): *"El sistema debe exportar el reporte en PDF y notificar por correo al responsable."* — mezcla exportación y notificación.
+- **Bien** (dos RF atómicos): *"El sistema debe exportar el reporte en formato PDF."* y *"El sistema debe notificar por correo al responsable cuando el reporte esté disponible."*
+
+Un RF que junta dos comportamientos con "y" casi siempre es compuesto: divídelo. Un RF atómico
+no se puede partir en dos sin perder información.
+
 ### RF simple
 Si la HU solo enuncia el requisito sin más detalle, produce un RF con los campos mínimos:
 
@@ -98,8 +110,8 @@ déjalos como `[]` / `null` según el tipo; la salida se valida contra el contra
   ],
   "requirements": [
     {
-      "description": "El sistema debe exportar el reporte de ventas en formato PDF y CSV.",
-      "source_text": "El reporte se genera en formato PDF y CSV.",
+      "description": "El sistema debe exportar el reporte de ventas en formato PDF.",
+      "source_text": "El reporte se genera en formato PDF.",
       "user_story_codes": ["HU-001"],
       "actor": "administrador",
       "objective": "exportar el reporte de ventas",
@@ -110,7 +122,7 @@ déjalos como `[]` / `null` según el tipo; la salida se valida contra el contra
       "conditions": [],
       "unspecified_information": ["no se especifica el tamaño máximo del archivo"],
       "evidence": [
-        { "user_story_code": "HU-001", "text": "El reporte se genera en formato PDF y CSV.", "attribute": "description" }
+        { "user_story_code": "HU-001", "text": "El reporte se genera en formato PDF.", "attribute": "description" }
       ]
     }
   ]
