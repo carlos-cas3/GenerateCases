@@ -1,5 +1,7 @@
 """Etapas P1–P7 y su construcción a partir de la configuración."""
 
+from ai_service.clients.clustering import ClusteringClient
+from ai_service.clients.embeddings import EmbeddingsClient
 from ai_service.clients.extractor import DocumentTextExtractor
 from ai_service.clients.llm import LlmClient
 from ai_service.clients.storage import DocumentStorage
@@ -8,22 +10,22 @@ from ai_service.core.errors import ConfigurationError
 from ai_service.pipeline.contracts.common import LlmSettings
 from ai_service.pipeline.contracts.p1 import P1Config
 from ai_service.pipeline.contracts.p2 import P2Config
+from ai_service.pipeline.contracts.p3 import P3Config
+from ai_service.pipeline.contracts.p4 import P4Config
 from ai_service.pipeline.prompts.p2 import resolve_p2_prompt
 from ai_service.pipeline.stages.base import StageBase, StageError, StageResult, StubStage
 from ai_service.pipeline.stages.p1_normalize import NormalizeStage, NormalizeStubStage
 from ai_service.pipeline.stages.p2_requirements import RequirementsStage, RequirementsStubStage
-from ai_service.pipeline.stages.p3_embeddings import EmbeddingsStage
-from ai_service.pipeline.stages.p4_clustering import ClusteringStage
+from ai_service.pipeline.stages.p3_embeddings import EmbeddingsStage, EmbeddingsStubStage
+from ai_service.pipeline.stages.p4_clustering import ClusteringStage, ClusteringStubStage
 from ai_service.pipeline.stages.p5_context import ContextStage
 from ai_service.pipeline.stages.p6_generation import GenerationStage
 from ai_service.pipeline.stages.p7_evaluation import EvaluationStage
 from ai_service.repositories.documents import DocumentsRepository
 from ai_service.repositories.pipeline_results import PipelineResultsRepository
 
-# Etapas que siguen simuladas tras la Fase 4 (P3–P7).
+# Etapas que siguen simuladas tras la Fase 5 (P5–P7).
 PENDING_STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
-    EmbeddingsStage,
-    ClusteringStage,
     ContextStage,
     GenerationStage,
     EvaluationStage,
@@ -32,6 +34,8 @@ PENDING_STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
 STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
     NormalizeStubStage,
     RequirementsStubStage,
+    EmbeddingsStubStage,
+    ClusteringStubStage,
     *PENDING_STUB_STAGE_CLASSES,
 )
 
@@ -66,6 +70,24 @@ def build_p2_config(settings: Settings) -> P2Config:
     )
 
 
+def build_p3_config(settings: Settings) -> P3Config:
+    return P3Config(
+        model_name=settings.embeddings_model,
+        normalize=settings.p3_normalize,
+        input_template=settings.p3_input_template,
+        batch_size=settings.p3_batch_size,
+    )
+
+
+def build_p4_config(settings: Settings) -> P4Config:
+    """`params` lleva los pisos mínimos de HDBSCAN (decisión 1), no tamaños forzados."""
+    return P4Config(
+        algorithm=settings.clustering_algorithm,
+        metric=settings.p4_metric,
+        params={"min_cluster_size": settings.p4_min_cluster_size, "min_samples": settings.p4_min_samples},
+    )
+
+
 def build_real_stages(
     settings: Settings,
     *,
@@ -74,10 +96,13 @@ def build_real_stages(
     extractor: DocumentTextExtractor,
     llm_client: LlmClient,
     results: PipelineResultsRepository,
+    embeddings_client: EmbeddingsClient,
+    clustering_client: ClusteringClient,
 ) -> list[StageBase]:
-    """P1 (heurística) y P2 (LLM) reales; P3–P7 siguen como stubs (Fase 4).
+    """P1 (heurística), P2 (LLM), P3 (embeddings) y P4 (clustering) reales; P5–P7 stubs (Fase 5).
 
-    P1 no recibe `LlmClient` (camino B). El fallo simulado solo aplica a las etapas stub.
+    P1 no recibe `LlmClient` (camino B). P3 recibe `provider` aparte de `P3Config` (H-2).
+    El fallo simulado solo aplica a las etapas stub.
     """
     p1 = NormalizeStage(
         documents=documents, storage=storage, extractor=extractor, results=results, config=build_p1_config(settings)
@@ -85,10 +110,17 @@ def build_real_stages(
     p2 = RequirementsStage(
         llm_client=llm_client, prompt_resolver=resolve_p2_prompt, results=results, config=build_p2_config(settings)
     )
+    p3 = EmbeddingsStage(
+        embeddings_client=embeddings_client,
+        config=build_p3_config(settings),
+        provider=settings.embeddings_provider,
+        max_retries=settings.p3_max_retries,
+    )
+    p4 = ClusteringStage(clustering_client=clustering_client, config=build_p4_config(settings), results=results)
     stubs = _stubs(
         PENDING_STUB_STAGE_CLASSES, settings.pipeline_stub_delay_seconds, settings.pipeline_stub_fail_at_stage
     )
-    return [p1, p2, *stubs]
+    return [p1, p2, p3, p4, *stubs]
 
 
 __all__ = [
@@ -98,10 +130,14 @@ __all__ = [
     "StubStage",
     "NormalizeStage",
     "RequirementsStage",
+    "EmbeddingsStage",
+    "ClusteringStage",
     "build_stub_stages",
     "build_real_stages",
     "build_p1_config",
     "build_p2_config",
+    "build_p3_config",
+    "build_p4_config",
     "STUB_STAGE_CLASSES",
     "PENDING_STUB_STAGE_CLASSES",
 ]

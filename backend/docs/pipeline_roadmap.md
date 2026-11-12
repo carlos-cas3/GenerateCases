@@ -7,7 +7,7 @@
 
 ## Resumen ejecutivo
 
-El pipeline tiene **7 etapas** (P1–P7). La infraestructura de orquestación está **completamente terminada**, la capa de contratos (P1–P6) está **completamente definida y con pruebas**, y `PipelineContext` ya transporta los outputs entre etapas. Desde la **Fase 4**, **P1** (segmentación heurística, sin LLM) y **P2** (clasificación + extracción de RF con LLM en lotes) tienen lógica real y persisten HU/RF en Supabase; **P3–P7 siguen como stubs simulados**. `PIPELINE_STAGES=stub` mantiene las siete etapas simuladas. Siguiente: **Fase 5 — P3 y P4**.
+El pipeline tiene **7 etapas** (P1–P7). La infraestructura de orquestación está **completamente terminada**, la capa de contratos (P1–P6) está **completamente definida y con pruebas**, y `PipelineContext` ya transporta los outputs entre etapas. Desde la **Fase 4**, **P1** (segmentación heurística, sin LLM) y **P2** (clasificación + extracción de RF con LLM en lotes) tienen lógica real y persisten HU/RF en Supabase. Desde la **Fase 5**, **P3** (embeddings en lotes, solo en memoria) y **P4** (clustering HDBSCAN, persistido con `persist_p4_clusters`) también son reales; **P5–P7 siguen como stubs simulados**. `PIPELINE_STAGES=stub` mantiene las siete etapas simuladas. Siguiente: **Fase 6 — P5**.
 
 ---
 
@@ -51,8 +51,8 @@ POST /api/v1/generations
 |---|---|---|---|---|---|---|
 | 1 | `p1` | Procesamiento, segmentación y estructuración de HU | ✅ sí | ✅ completo | ✅ real (heurística) | — (sin LLM; `plantilla_hu.md`) |
 | 2 | `p2` | Clasificación de HU y extracción de RF | ✅ sí | ✅ completo | ✅ real (LLM en lotes) | ✅ completo |
-| 3 | `p3` | Generación de embeddings | ✅ sí | ✅ completo | 🔴 stub | — (sin LLM) |
-| 4 | `p4` | Clustering semántico | ✅ sí | ✅ completo | 🔴 stub | — (sin LLM) |
+| 3 | `p3` | Generación de embeddings | ✅ sí | ✅ completo | ✅ real (embeddings en lotes, sin persistir) | — (sin LLM) |
+| 4 | `p4` | Clustering semántico | ✅ sí | ✅ completo | ✅ real (HDBSCAN) | — (sin LLM) |
 | 5 | `p5` | Construcción de contexto estructurado | ✅ sí | ✅ completo | 🔴 stub | — (sin LLM) |
 | 6 | `p6` | Generación de casos de prueba funcionales | ✅ sí | ✅ completo | 🔴 stub | ✅ completo (2 variantes) |
 | 7 | `p7` | Evaluación de resultados | ❌ no | ⏸ pendiente | 🔴 stub | ⏸ pendiente |
@@ -110,7 +110,7 @@ Validaciones cruzadas: clasificaciones ↔ RF, HU `no_aplicable` no generan RF, 
 
 ### `contracts/p4.py` ✅
 `P4Input → P4Output (tuple[SemanticCluster] + unassigned)`  
-RF pueden estar en múltiples clusters (R6). `P4Output.to_rpc_payload()` → `persist_p4_clusters` (pendiente).
+El contrato admite RF en varios clusters (R6), pero HDBSCAN produce membresía única (D-31 diferido). `P4Output.to_rpc_payload()` → `persist_p4_clusters` (caller añadido en Fase 5).
 
 ### `contracts/p5.py` ✅
 `P5Input → P5Output (GenerationContext)`  
@@ -179,14 +179,18 @@ Detalle: `prompts_fases/Fase 4/fase4.md` y `prompts_fases/Fase 4/cierre_document
 - [x] Decisiones `schema.sql` T-01, T-02, T-04 (`decisiones_schema.sql.md`)
 - [x] Desplegar `schema.sql` actualizado contra Supabase (manual) — desplegado 2026-11-11
 
-### 🔲 Fase 5 — Implementación de P3 y P4 (embeddings + clustering)
-**Prerequisito:** proveedor de embeddings configurado. (`schema.sql` ya desplegado: `persist_p4_clusters` existe y es idempotente.)
+### ✅ Fase 5 — Implementación de P3 y P4 (embeddings + clustering)
+Detalle: `prompts_fases/Fase 5/fase5.md` y `prompts_fases/Fase 5/cierre_documental_fase5.md`.
 
-- [ ] Variables de entorno para proveedor de embeddings
-- [ ] Puerto `EmbeddingsClient` (Protocol)
-- [ ] Implementar `EmbeddingsStage.run()` — genera vectores en batches, valida `P3Output`
-- [ ] Implementar `ClusteringStage.run()` — aplica algoritmo, valida `P4Output`, llama a `persist_p4_clusters`
-- [ ] RPC `persist_p4_clusters` en el cliente Supabase
+- [x] Variables de entorno de `P3Config`/`P4Config` (`P3_NORMALIZE`, `P3_INPUT_TEMPLATE`, `P3_BATCH_SIZE`,
+      `P3_MAX_RETRIES`, `P4_METRIC`, `P4_MIN_CLUSTER_SIZE`, `P4_MIN_SAMPLES`); las del proveedor de
+      embeddings ya existían (Fase 3)
+- [x] Puerto `EmbeddingsClient` (Protocol) — **ya existía desde la Fase 3** (corrección: no era tarea de la Fase 5)
+- [x] `EmbeddingsStage.run()` — vectores en lotes con reintento solo transitorio, valida `P3Output`, no persiste (D-09)
+- [x] `ClusteringStage.run()` — HDBSCAN, `"Cluster {label}"`, `similarity_to_centroid`, D-32, llama a `persist_p4_clusters`
+- [x] Caller de `persist_p4_clusters` en `PipelineResultsRepository` (Supabase + fake en memoria).
+      **Corrección:** la RPC ya estaba en `schema.sql` y desplegada (2026-11-11); solo faltaba el caller.
+- [x] Prerrequisito de calidad: prompt de P2 corregido para RF atómicos (commit `85d580c`)
 
 ### 🔲 Fase 6 — Implementación de P5 (contexto estructurado)
 - [ ] Implementar `ContextStage.run()` — agrupa RF por cluster o por HU según `UnitStrategy`, construye `GenerationContext`, respeta `max_tokens_per_unit`
@@ -219,7 +223,8 @@ Otros cierres pendientes:
 | D-33 | P7 es no bloqueante: su fallo no cambia la generación a `failed` |
 | D-38 | P6 tiene dos variantes de prompt según `UnitStrategy` |
 | D-39 | Sin clustering → `UnitStrategy.BY_USER_STORY`; con clustering → `BY_CLUSTER` |
-| R6 | Un RF puede pertenecer a varios clusters; P5 decide en cuál es objetivo |
+| R6 | El contrato permite un RF en varios clusters, pero HDBSCAN da membresía única; D-31 (P5 elige el cluster objetivo) queda diferido |
+| D-36 | RF sin cluster se guardan y se muestran, pero no generan casos (regla para la Fase 6) |
 
 ---
 
@@ -233,3 +238,8 @@ Otros cierres pendientes:
    `persist_p6_unit` existen y son idempotentes. Con `PIPELINE_STAGES=real` P1 ya no falla con
    `PERSISTENCE_FAILED`.
 5. **Heurística de P1 sensible a "para"** — la declaración se parte en la primera aparición de la palabra "para" (`… quiero un botón para exportar, para …` → objetivo "un botón"). Ver `cierre_documental_fase4.md`.
+6. **Calibración de HDBSCAN pendiente** — `P4_MIN_CLUSTER_SIZE=2` / `P4_MIN_SAMPLES=1` son valores
+   iniciales. Validar con documentos reales y ajustar por env var. Con muy pocos RF (≤3 en pruebas
+   locales) HDBSCAN suele marcar todo como ruido → D-32 (`INSUFFICIENT_REQUIREMENTS`).
+7. **Sin prueba de `persist_p4_clusters` contra Postgres real** — validada con el fake en memoria y
+   tests del adaptador; conviene un smoke test contra Supabase.

@@ -307,7 +307,7 @@ async def test_hdbscan_reports_effective_params_not_only_requested_ones() -> Non
     result = await HDBSCANClusteringClient().cluster(_two_groups_and_an_outlier())
     assert result.params["min_cluster_size"] == 3
     assert "min_samples" in result.params and "cluster_selection_method" in result.params
-    json.dumps(result.params)
+    json.dumps(result.params, allow_nan=False)  # jsonb no admite Infinity/NaN (runtime_info de P4)
 
 
 async def test_hdbscan_supports_cosine_metric() -> None:

@@ -1,9 +1,9 @@
 # Fase 5 — Implementación real de P3 (embeddings) y P4 (clustering)
 
-> **Estado:** 🔲 sin empezar — decisiones del responsable **resueltas** (ver §"Decisiones de la
-> fase"); listo para implementar. Los prerequisitos (puertos, adaptadores, contratos, RPC) ya
-> están construidos. Falta verificar el **prerrequisito de atomicidad de P2** antes de pasar
-> documentos reales.
+> **Estado:** ✅ implementada en código y pruebas (464 tests). Detalle en
+> [`cierre_documental_fase5.md`](cierre_documental_fase5.md). Pendiente fuera de código: smoke
+> test de `persist_p4_clusters` contra Supabase y calibrar HDBSCAN / confirmar atomicidad de P2
+> con documentos reales.
 > **Rama de la fase anterior:** rama de trabajo de la Fase 4 (cerrada en código y pruebas;
 > `schema.sql` desplegado en Supabase el 2026-11-11).
 > **Documentos fuente:** `docs/pipeline_roadmap.md`,
@@ -282,20 +282,20 @@ T-F5-07 (cierre documental + roadmap)
 
 La Fase 5 está completa cuando **todos** estos puntos se cumplen:
 
-- [ ] `EmbeddingsStage` y `ClusteringStage` no heredan de `StubStage` (lógica real).
-- [ ] Un documento con clustering activado produce embeddings reales (en memoria) y clusters
-      reales persistidos en Supabase (P5–P7 siguen como stubs).
-- [ ] El repositorio expone el caller de `persist_p4_clusters` (puerto + adaptador + fake).
-- [ ] `config.py` expone las variables de `P3Config`/`P4Config` (incluidas las de la decisión 1).
-- [ ] P3 no persiste (D-09); P4 persiste vía `persist_p4_clusters`.
-- [ ] P4 nombra clusters como `"Cluster {label}"` (D-A) y calcula/persiste
+- [x] `EmbeddingsStage` y `ClusteringStage` no heredan de `StubStage` (lógica real).
+- [x] Un documento con clustering activado produce embeddings reales (en memoria) y clusters
+      reales persistidos (P5–P7 siguen como stubs). *Verificado E2E con fakes; falta smoke test contra Supabase.*
+- [x] El repositorio expone el caller de `persist_p4_clusters` (puerto + adaptador + fake).
+- [x] `config.py` expone las variables de `P3Config`/`P4Config` (incluidas las de la decisión 1).
+- [x] P3 no persiste (D-09); P4 persiste vía `persist_p4_clusters`.
+- [x] P4 nombra clusters como `"Cluster {label}"` (D-A) y calcula/persiste
       `similarity_to_centroid` (D-B).
-- [ ] R6 (membresía única con HDBSCAN; D-31 diferido) y D-32 (pocos RF → `unassigned`,
+- [x] R6 (membresía única con HDBSCAN; D-31 diferido) y D-32 (pocos RF → `unassigned`,
       `completed` con aviso) funcionan.
-- [ ] P3/P4 quedan `skipped` con `clustering_enabled=false` y con 0 RF (D-29).
-- [ ] Pruebas de P3 (`embeddings_fake`) y P4 (`clustering_fake`) pasan; la suite de contratos
+- [x] P3/P4 quedan `skipped` con `clustering_enabled=false` y con 0 RF (D-29).
+- [x] Pruebas de P3 (`embeddings_fake`) y P4 (`clustering_fake`) pasan; la suite de contratos
       sin regresión.
-- [ ] `pipeline_roadmap.md` actualizado (y corregido) y `cierre_documental_fase5.md` generado.
+- [x] `pipeline_roadmap.md` actualizado (y corregido) y `cierre_documental_fase5.md` generado.
 
 ---
 
@@ -346,7 +346,7 @@ La Fase 5 está completa cuando **todos** estos puntos se cumplen:
 | 2 | Subida de documentos (backend + frontend) | ✅ |
 | 3 | Contratos P1–P6 + `PipelineContext` + prompts P6 | ✅ |
 | 4 | Implementación de P1 (heurística) y P2 (LLM) | ✅ |
-| **5** | **Implementación de P3 (embeddings) y P4 (clustering)** | **🔲** |
+| **5** | **Implementación de P3 (embeddings) y P4 (clustering)** | **✅** |
 | 6 | Implementación de P5 (contexto estructurado) | 🔲 |
 | 7 | Implementación de P6 (generación de casos de prueba) | 🔲 |
 | 8 | Implementación de P7 (evaluación) + cierre (SSE, integración E2E) | 🔲 |

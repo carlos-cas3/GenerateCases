@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_service_role_key: SecretStr | None = None
 
-    # `real`: P1 (heurística) y P2 (LLM) reales, P3–P7 stubs (Fase 4). `stub`: las 7 simuladas
+    # `real`: P1–P4 reales, P5–P7 stubs (Fase 5). `stub`: las 7 simuladas
     # (arranque sin LLM/Supabase de resultados y tests del orquestador).
     pipeline_stages: PipelineStagesLiteral = "real"
     pipeline_stub_delay_seconds: float = Field(default=2.0, ge=0)
@@ -66,12 +66,37 @@ class Settings(BaseSettings):
     embeddings_timeout_seconds: float = Field(default=60.0, gt=0)  # solo proveedores remotos
     clustering_algorithm: ClusteringAlgorithmLiteral = "hdbscan"
 
+    # Configuración de P3 (embeddings en lotes). Ver Fase 5 (fase5.md, decisiones 3–5).
+    p3_normalize: bool = True
+    p3_input_template: str = Field(default="{code}. {description}", min_length=1)
+    p3_batch_size: int = Field(default=32, gt=0)
+    p3_max_retries: int = Field(default=2, ge=0)  # solo fallos transitorios del proveedor
+
+    # Configuración de P4 (clustering). Pisos mínimos de HDBSCAN, no tamaños forzados (decisión 1).
+    p4_metric: str = Field(default="cosine", min_length=1)
+    p4_min_cluster_size: int = Field(default=2, ge=2)  # HDBSCAN no admite clusters de 1
+    p4_min_samples: int = Field(default=1, ge=1)
+
     @field_validator("pipeline_stub_fail_at_stage", "llm_base_url", "llm_model", mode="before")
     @classmethod
     def _empty_as_none(cls, value: object) -> object:
         """Permite dejar la variable vacía en `.env` (fallo simulado desactivado, sin URL base)."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("p3_input_template")
+    @classmethod
+    def _valid_template(cls, value: str) -> str:
+        """La plantilla solo admite `{code}` y `{description}` y debe usar `{description}`."""
+        try:
+            rendered = value.format(code="RF-000", description="\x00")
+        except (KeyError, IndexError, ValueError) as exc:
+            raise ValueError(
+                f"P3_INPUT_TEMPLATE inválida (solo admite {{code}} y {{description}}): {exc}"
+            ) from exc
+        if "\x00" not in rendered:
+            raise ValueError("P3_INPUT_TEMPLATE debe incluir {description}.")
         return value
 
     @field_validator("p1_story_delimiter_pattern")
