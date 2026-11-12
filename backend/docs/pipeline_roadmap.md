@@ -177,10 +177,10 @@ Detalle: `prompts_fases/Fase 4/fase4.md` y `prompts_fases/Fase 4/cierre_document
 - [x] `RequirementsStage.run()` — LLM en lotes con reintentos → `P2Output` → `persist_p2_requirements` (D-29)
 - [x] RPC `persist_p1_user_stories` + callers en `PipelineResultsRepository` (Supabase y fake en memoria)
 - [x] Decisiones `schema.sql` T-01, T-02, T-04 (`decisiones_schema.sql.md`)
-- [ ] Desplegar `schema.sql` actualizado contra Supabase (manual)
+- [x] Desplegar `schema.sql` actualizado contra Supabase (manual) — desplegado 2026-11-11
 
 ### 🔲 Fase 5 — Implementación de P3 y P4 (embeddings + clustering)
-**Prerequisito:** proveedor de embeddings configurado.
+**Prerequisito:** proveedor de embeddings configurado. (`schema.sql` ya desplegado: `persist_p4_clusters` existe y es idempotente.)
 
 - [ ] Variables de entorno para proveedor de embeddings
 - [ ] Puerto `EmbeddingsClient` (Protocol)
@@ -228,5 +228,8 @@ Otros cierres pendientes:
 1. **`dict` en modelos frozen** — Los siguientes campos tienen `dict` que `frozen=True` no hace realmente inmutable: `LlmSettings.parameters`, `TestData.inputs`, `P4Config.params`, `ClusteringAlgorithmInfo.params`, `TestCaseOutputSpec.json_schema`, `ContextUnit.requirement_to_stories`.
 2. **`persist_p6_unit` no guarda `validation_notes`** — Los vínculos RF↔CP se insertan siempre `pending` y sin `validation_notes` (D-18 anotación de soporte no llega a la BD).
 3. **`StageError` sin `stage_key`** — El diseño original preveía un campo `stage_key` en `StageError`, pero la implementación actual no lo incluye.
-4. **`schema.sql` sin desplegar** — `persist_p1_user_stories`, T-01 y T-02 solo existen en el archivo; con `PIPELINE_STAGES=real` contra una BD sin desplegar, P1 falla con `PERSISTENCE_FAILED`.
+4. **~~`schema.sql` sin desplegar~~ — RESUELTO (2026-11-11):** `schema.sql` desplegado en Supabase.
+   Las RPCs `persist_p1_user_stories`, `persist_p2_requirements`, `persist_p4_clusters` y
+   `persist_p6_unit` existen y son idempotentes. Con `PIPELINE_STAGES=real` P1 ya no falla con
+   `PERSISTENCE_FAILED`.
 5. **Heurística de P1 sensible a "para"** — la declaración se parte en la primera aparición de la palabra "para" (`… quiero un botón para exportar, para …` → objetivo "un botón"). Ver `cierre_documental_fase4.md`.

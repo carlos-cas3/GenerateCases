@@ -1,7 +1,8 @@
 # Cierre documental — Fase 4 (P1 heurística + P2 LLM)
 
-> **Estado:** ✅ implementación cerrada en código y pruebas. **Pendiente manual:** desplegar
-> `supabase/schema.sql` contra Supabase (T-01, T-02 y `persist_p1_user_stories`).
+> **Estado:** ✅ implementación cerrada en código y pruebas. **`schema.sql` desplegado en
+> Supabase (2026-11-11):** las RPCs `persist_p1_user_stories`, `persist_p2_requirements`,
+> `persist_p4_clusters` y `persist_p6_unit` existen y son idempotentes.
 > **Alcance:** T-F4-04 … T-F4-09 + callers (§2 de `guia_implementacion.md`). La base de §1
 > (config, schema, prompts, openapi) se verificó antes de continuar (ver §1).
 > **Prueba local (Ollama):** configuración de `.env` y evidencia en
@@ -94,8 +95,10 @@
 
 ## 4. Advertencias nuevas
 
-1. **`schema.sql` sin desplegar**: con `PIPELINE_STAGES=real` contra una BD sin la versión nueva,
-   P1 falla con `PERSISTENCE_FAILED` (la RPC no existe).
+1. **~~`schema.sql` sin desplegar~~ — RESUELTO (2026-11-11):** `schema.sql` desplegado en Supabase.
+   Las RPCs `persist_p1_user_stories`, `persist_p2_requirements`, `persist_p4_clusters` y
+   `persist_p6_unit` existen y son idempotentes. Con `PIPELINE_STAGES=real` P1 ya no falla con
+   `PERSISTENCE_FAILED`.
 2. **`LLM_MODEL` obligatoria en modo `real`**: un `.env` antiguo sin `LLM_MODEL` impide arrancar.
    Usar `PIPELINE_STAGES=stub` para desarrollo sin LLM.
 3. **Ambigüedad de "para"**: la declaración se parte en la primera aparición de la palabra
@@ -137,7 +140,7 @@ pytest                                                              → 427 pass
 ## 6. Criterios de cierre (`fase4.md` §5)
 
 - [x] `NormalizeStage` y `RequirementsStage` no heredan de `StubStage`.
-- [x] Un documento produce HU y RF reales persistidos (verificado con fakes; en Supabase tras desplegar `schema.sql`).
+- [x] Un documento produce HU y RF reales persistidos (verificado con fakes; `schema.sql` desplegado en Supabase).
 - [x] T-01, T-02, T-04 registradas en `decisiones_schema.sql.md` y aplicadas en `schema.sql`.
 - [x] Spec de plantilla (P1) y `prompts/p2.py` + texto (P2), cada uno usado por su etapa.
 - [x] P1 no recibe `LlmClient`; marca las no identificadas como `UnresolvedFragment`.
