@@ -1,6 +1,7 @@
 """Contratos de P1 — Procesamiento, segmentación y estructuración de HU (`pipeline_design.md`, P1)."""
 
 import re
+from typing import Any
 from uuid import UUID
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
@@ -119,7 +120,8 @@ class P1Input(ContractModel):
 
 
 class P1Output(ContractModel):
-    """Salida de P1. La consumen P2 (HU no `invalid`) y P5. Se persiste en `user_stories`.
+    """Salida de P1. La consumen P2 (HU no `invalid`) y P5. Se persiste en `user_stories`
+    con `persist_p1_user_stories` (ver `to_rpc_payload`).
 
     P1 falla con `NO_STORIES_FOUND` si no hay ninguna HU procesable, así que el contrato la exige.
     """
@@ -148,3 +150,23 @@ class P1Output(ContractModel):
         if counts[StoryValidationStatus.INVALID] == len(self.user_stories):
             raise ValueError("debe haber al menos una HU procesable (no invalid)")
         return self
+
+    def to_rpc_payload(self) -> list[dict[str, Any]]:
+        """`p_payload` de `persist_p1_user_stories`. `generation_id` va aparte (`p_generation_id`).
+
+        `objective` → `action` y `benefit` → `goal` (D-02). `issues`, `content_sections`,
+        `normalized_text` y `unresolved_fragments` no se persisten (D-22).
+        """
+        return [
+            {
+                "id": str(story.id),
+                "code": story.code,
+                "position": story.position,
+                "original_text": story.original_text,
+                "role": story.role,
+                "action": story.objective,
+                "goal": story.benefit,
+                "validation_status": story.validation_status.value,
+            }
+            for story in self.user_stories
+        ]

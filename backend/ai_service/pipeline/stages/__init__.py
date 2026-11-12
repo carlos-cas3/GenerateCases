@@ -1,17 +1,27 @@
 """Etapas P1–P7 y su construcción a partir de la configuración."""
 
+from ai_service.clients.extractor import DocumentTextExtractor
+from ai_service.clients.llm import LlmClient
+from ai_service.clients.storage import DocumentStorage
+from ai_service.config import Settings
+from ai_service.core.errors import ConfigurationError
+from ai_service.pipeline.contracts.common import LlmSettings
+from ai_service.pipeline.contracts.p1 import P1Config
+from ai_service.pipeline.contracts.p2 import P2Config
+from ai_service.pipeline.prompts.p2 import resolve_p2_prompt
 from ai_service.pipeline.stages.base import StageBase, StageError, StageResult, StubStage
-from ai_service.pipeline.stages.p1_normalize import NormalizeStage
-from ai_service.pipeline.stages.p2_requirements import RequirementsStage
+from ai_service.pipeline.stages.p1_normalize import NormalizeStage, NormalizeStubStage
+from ai_service.pipeline.stages.p2_requirements import RequirementsStage, RequirementsStubStage
 from ai_service.pipeline.stages.p3_embeddings import EmbeddingsStage
 from ai_service.pipeline.stages.p4_clustering import ClusteringStage
 from ai_service.pipeline.stages.p5_context import ContextStage
 from ai_service.pipeline.stages.p6_generation import GenerationStage
 from ai_service.pipeline.stages.p7_evaluation import EvaluationStage
+from ai_service.repositories.documents import DocumentsRepository
+from ai_service.repositories.pipeline_results import PipelineResultsRepository
 
-STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
-    NormalizeStage,
-    RequirementsStage,
+# Etapas que siguen simuladas tras la Fase 4 (P3–P7).
+PENDING_STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
     EmbeddingsStage,
     ClusteringStage,
     ContextStage,
@@ -19,10 +29,79 @@ STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
     EvaluationStage,
 )
 
+STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
+    NormalizeStubStage,
+    RequirementsStubStage,
+    *PENDING_STUB_STAGE_CLASSES,
+)
+
+
+def _stubs(classes: tuple[type[StubStage], ...], delay_seconds: float, fail_at_stage: str | None) -> list[StageBase]:
+    return [cls(delay_seconds, fail=cls.key.value == fail_at_stage) for cls in classes]
+
 
 def build_stub_stages(delay_seconds: float, fail_at_stage: str | None = None) -> list[StageBase]:
     """Instancia las siete etapas simuladas en orden, inyectando el fallo si se indica."""
-    return [cls(delay_seconds, fail=cls.key.value == fail_at_stage) for cls in STUB_STAGE_CLASSES]
+    return _stubs(STUB_STAGE_CLASSES, delay_seconds, fail_at_stage)
 
 
-__all__ = ["StageBase", "StageError", "StageResult", "StubStage", "build_stub_stages", "STUB_STAGE_CLASSES"]
+def build_p1_config(settings: Settings) -> P1Config:
+    return P1Config(
+        rules_version=settings.p1_rules_version,
+        language=settings.p1_language,
+        story_delimiter_pattern=settings.p1_story_delimiter_pattern,
+        max_story_chars=settings.p1_max_story_chars,
+    )
+
+
+def build_p2_config(settings: Settings) -> P2Config:
+    """`P2Config` desde `Settings`. Sin `LLM_MODEL` el servicio no arranca (`ConfigurationError`)."""
+    if not settings.llm_model:
+        raise ConfigurationError("LLM_MODEL es obligatoria para ejecutar P2 (PIPELINE_STAGES=real).")
+    return P2Config(
+        prompt_version=settings.p2_prompt_version,
+        llm=LlmSettings(provider=settings.llm_provider, model=settings.llm_model, parameters={}),
+        max_stories_per_call=settings.p2_max_stories_per_call,
+        max_retries=settings.p2_max_retries,
+    )
+
+
+def build_real_stages(
+    settings: Settings,
+    *,
+    documents: DocumentsRepository,
+    storage: DocumentStorage,
+    extractor: DocumentTextExtractor,
+    llm_client: LlmClient,
+    results: PipelineResultsRepository,
+) -> list[StageBase]:
+    """P1 (heurística) y P2 (LLM) reales; P3–P7 siguen como stubs (Fase 4).
+
+    P1 no recibe `LlmClient` (camino B). El fallo simulado solo aplica a las etapas stub.
+    """
+    p1 = NormalizeStage(
+        documents=documents, storage=storage, extractor=extractor, results=results, config=build_p1_config(settings)
+    )
+    p2 = RequirementsStage(
+        llm_client=llm_client, prompt_resolver=resolve_p2_prompt, results=results, config=build_p2_config(settings)
+    )
+    stubs = _stubs(
+        PENDING_STUB_STAGE_CLASSES, settings.pipeline_stub_delay_seconds, settings.pipeline_stub_fail_at_stage
+    )
+    return [p1, p2, *stubs]
+
+
+__all__ = [
+    "StageBase",
+    "StageError",
+    "StageResult",
+    "StubStage",
+    "NormalizeStage",
+    "RequirementsStage",
+    "build_stub_stages",
+    "build_real_stages",
+    "build_p1_config",
+    "build_p2_config",
+    "STUB_STAGE_CLASSES",
+    "PENDING_STUB_STAGE_CLASSES",
+]

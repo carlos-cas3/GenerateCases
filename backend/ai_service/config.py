@@ -11,6 +11,7 @@ StageKeyLiteral = Literal["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
 LlmProviderLiteral = Literal["openai", "anthropic", "ollama"]
 EmbeddingsProviderLiteral = Literal["local", "openai"]
 ClusteringAlgorithmLiteral = Literal["hdbscan"]
+PipelineStagesLiteral = Literal["real", "stub"]
 
 
 class Settings(BaseSettings):
@@ -21,6 +22,9 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_service_role_key: SecretStr | None = None
 
+    # `real`: P1 (heurística) y P2 (LLM) reales, P3–P7 stubs (Fase 4). `stub`: las 7 simuladas
+    # (arranque sin LLM/Supabase de resultados y tests del orquestador).
+    pipeline_stages: PipelineStagesLiteral = "real"
     pipeline_stub_delay_seconds: float = Field(default=2.0, ge=0)
     pipeline_stub_fail_at_stage: StageKeyLiteral | None = None
     default_method_type: str = Field(default="llm_pipeline", min_length=1)

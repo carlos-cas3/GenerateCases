@@ -42,7 +42,8 @@ def store() -> InMemoryStore:
 
 
 def make_settings(**overrides: Any) -> Settings:
-    values: dict[str, Any] = {"pipeline_stub_delay_seconds": 0, **overrides}
+    # `stub` por defecto: los tests de API no programan respuestas de LLM ni extractor.
+    values: dict[str, Any] = {"pipeline_stub_delay_seconds": 0, "pipeline_stages": "stub", **overrides}
     return Settings(_env_file=None, **values)
 
 

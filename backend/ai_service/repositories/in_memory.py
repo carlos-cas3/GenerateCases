@@ -8,7 +8,15 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from ai_service.core.errors import DocumentInUse, DocumentNotFound, GenerationInProgress, GenerationNotFound, InvalidStateTransition
+from ai_service.core.errors import (
+    DocumentInUse,
+    DocumentNotFound,
+    DuplicateEntryError,
+    GenerationInProgress,
+    GenerationNotFound,
+    InvalidReferenceError,
+    InvalidStateTransition,
+)
 from ai_service.core.time import utc_now
 from ai_service.schemas.generations import (
     ACTIVE_GENERATION_STATUSES,
@@ -31,6 +39,10 @@ class InMemoryStore:
     generations: dict[UUID, GenerationRecord] = field(default_factory=dict)
     insertion_order: dict[UUID, int] = field(default_factory=dict)
     document_order: dict[UUID, int] = field(default_factory=dict)
+    # Resultados del pipeline por generación (filas tal como las guardan las RPC persist_pN_*).
+    user_stories: dict[UUID, dict[str, dict[str, Any]]] = field(default_factory=dict)  # gid → code → fila
+    requirements: dict[UUID, dict[str, dict[str, Any]]] = field(default_factory=dict)  # gid → code → fila
+    story_requirements: dict[UUID, set[tuple[str, str]]] = field(default_factory=dict)  # gid → {(HU, RF)}
     _sequence: itertools.count = field(default_factory=itertools.count)
 
     def add_generation(self, record: GenerationRecord) -> None:
@@ -252,3 +264,45 @@ class InMemoryGenerationsRepository:
             record.completed_at = at
             interrupted.append(record.id)
         return interrupted
+
+
+class InMemoryPipelineResultsRepository:
+    """Fake de `PipelineResultsRepository`. Replica la semántica de las RPC (idempotencia, T-02, FK)."""
+
+    def __init__(self, store: InMemoryStore) -> None:
+        self._store = store
+        self.calls: list[tuple[str, UUID]] = []
+
+    async def persist_p1_user_stories(self, generation_id: UUID, payload: list[dict[str, Any]]) -> None:
+        self.calls.append(("persist_p1_user_stories", generation_id))
+        stories = self._store.user_stories.setdefault(generation_id, {})
+        for row in payload:
+            # ON CONFLICT (generation_id, code) DO UPDATE: conserva el id de la fila existente.
+            existing = stories.get(row["code"])
+            stories[row["code"]] = {**row, "id": existing["id"] if existing else row["id"]}
+
+    async def persist_p2_requirements(self, generation_id: UUID, payload: dict[str, Any]) -> None:
+        self.calls.append(("persist_p2_requirements", generation_id))
+        stories = self._store.user_stories.get(generation_id, {})
+        classifications = payload.get("classifications", [])
+        codes = [item["user_story_code"] for item in classifications]
+        repeated = sorted({code for code in codes if codes.count(code) > 1})
+        if repeated:
+            raise DuplicateEntryError(f"la HU {repeated[0]} aparece 2 o más veces en el payload")
+        missing = [code for code in codes if code not in stories]
+        missing += [c for r in payload.get("requirements", []) for c in r["user_story_codes"] if c not in stories]
+        if missing:
+            raise InvalidReferenceError(f"la HU {missing[0]} no existe en la generación")
+
+        for item in classifications:
+            stories[item["user_story_code"]].update(
+                classification=item["classification"],
+                classification_rationale=item["classification_rationale"],
+                clarification_items=list(item.get("clarification_items") or []),
+            )
+        requirements = self._store.requirements.setdefault(generation_id, {})
+        links = self._store.story_requirements.setdefault(generation_id, set())
+        for row in payload.get("requirements", []):
+            existing = requirements.get(row["code"])
+            requirements[row["code"]] = {**row, "id": existing["id"] if existing else row["id"]}
+            links.update((code, row["code"]) for code in row["user_story_codes"])

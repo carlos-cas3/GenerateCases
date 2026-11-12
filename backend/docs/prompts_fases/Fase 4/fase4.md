@@ -1,6 +1,7 @@
 # Fase 4 — Implementación real de P1 (heurística) y P2 (LLM)
 
-> **Estado:** 🔲 pendiente (la Fase 3 está cerrada en el commit `a4940ea`).
+> **Estado:** ✅ cerrada en código y pruebas — ver `cierre_documental_fase4.md`. Pendiente manual:
+> desplegar `supabase/schema.sql` contra Supabase. (La Fase 3 está cerrada en el commit `a4940ea`.)
 > **Rama de la fase anterior:** `revision_fase3`
 > **Documentos fuente:** `docs/pipeline_roadmap.md`, `docs/prompts_fases/Fase 3/cierre_documental.md`,
 > `docs/prompts_fases/Fase 3/tareas_pendientes_final_fase3.md`, `ai_service/pipeline/contracts/p1.py`,
@@ -219,17 +220,17 @@ T-F4-09 (cierre documental)
 
 La Fase 4 está completa cuando **todos** estos puntos se cumplen:
 
-- [ ] `NormalizeStage` y `RequirementsStage` no heredan de `StubStage` (lógica real).
-- [ ] Un documento subido produce HU y RF **reales** persistidos en Supabase (P3–P7 siguen como stubs).
-- [ ] Las decisiones T-01, T-02 y T-04 están registradas en `decisiones_schema.sql.md` y aplicadas en `schema.sql` (lo que corresponda).
-- [ ] Existe la **spec de plantilla de HU** (P1, sin LLM) y `prompts/p2.py` + texto (P2, con LLM); cada uno lo usa su etapa.
-- [ ] P1 no recibe `LlmClient`; identifica HU con heurística y marca las no identificadas como `UnresolvedFragment`.
-- [ ] El cliente Supabase expone `persist_p2_requirements` (caller).
-- [ ] Existe la RPC `persist_p1_user_stories` (+ caller) y P1 persiste las HU.
-- [ ] `config.py` expone las variables de `P1Config`/`P2Config` (Hueco B).
-- [ ] Pruebas de P1 (extractor fake) y P2 (LLM fake) pasan; la suite de contratos sin regresión.
-- [ ] D-29 funciona: 0 RF en P2 → P3–P7 `skipped` y generación `completed`.
-- [ ] `pipeline_roadmap.md` actualizado y `cierre_documental_fase4.md` generado.
+- [x] `NormalizeStage` y `RequirementsStage` no heredan de `StubStage` (lógica real).
+- [x] Un documento subido produce HU y RF **reales** persistidos en Supabase (P3–P7 siguen como stubs).
+- [x] Las decisiones T-01, T-02 y T-04 están registradas en `decisiones_schema.sql.md` y aplicadas en `schema.sql` (lo que corresponda).
+- [x] Existe la **spec de plantilla de HU** (P1, sin LLM) y `prompts/p2.py` + texto (P2, con LLM); cada uno lo usa su etapa.
+- [x] P1 no recibe `LlmClient`; identifica HU con heurística y marca las no identificadas como `UnresolvedFragment`.
+- [x] El cliente Supabase expone `persist_p2_requirements` (caller).
+- [x] Existe la RPC `persist_p1_user_stories` (+ caller) y P1 persiste las HU.
+- [x] `config.py` expone las variables de `P1Config`/`P2Config` (Hueco B).
+- [x] Pruebas de P1 (extractor fake) y P2 (LLM fake) pasan; la suite de contratos sin regresión.
+- [x] D-29 funciona: 0 RF en P2 → P3–P7 `skipped` y generación `completed`.
+- [x] `pipeline_roadmap.md` actualizado y `cierre_documental_fase4.md` generado.
 
 ---
 
@@ -262,7 +263,7 @@ La Fase 4 está completa cuando **todos** estos puntos se cumplen:
 | 1.5 | Conexión frontend–backend (CORS, polling, rehidratación) | ✅ |
 | 2 | Subida de documentos (backend + frontend) | ✅ |
 | 3 | Contratos P1–P6 + `PipelineContext` + prompts P6 | ✅ |
-| **4** | **Implementación de P1 (heurística) y P2 (LLM)** | **🔲 actual** |
+| **4** | **Implementación de P1 (heurística) y P2 (LLM)** | **✅** |
 | 5 | Implementación de P3 y P4 (embeddings + clustering) | 🔲 |
 | 6 | Implementación de P5 (contexto estructurado) | 🔲 |
 | 7 | Implementación de P6 (generación de casos de prueba) | 🔲 |
