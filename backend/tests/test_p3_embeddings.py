@@ -18,7 +18,7 @@ from ai_service.pipeline.contracts.p3 import P3Config
 from ai_service.pipeline.stages import EmbeddingsStage, StageError
 from tests import contract_factories as f
 
-TEMPLATE = "{code}. {description}"
+TEMPLATE = "{description}"
 
 
 def _requirements(count: int) -> tuple:
@@ -68,7 +68,7 @@ async def test_happy_path_in_batches_builds_p3_output() -> None:
 
     assert [len(r.texts) for r in client.requests] == [2, 1]
     first = client.requests[0]
-    assert first.texts[0] == "RF-001. El sistema permite iniciar sesión con credenciales válidas."
+    assert first.texts[0] == "El sistema permite iniciar sesión con credenciales válidas."
     assert (first.model, first.input_template, first.normalize, first.extra) == ("mini", TEMPLATE, True, {"batch_size": 2})
 
     output = ctx.p3_output

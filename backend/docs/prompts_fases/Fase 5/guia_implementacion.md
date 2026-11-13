@@ -66,7 +66,7 @@ Añadir a `ai_service/config.py` (`Settings`), junto a las `p1_*`/`p2_*` existen
 ```python
 # P3 (embeddings)
 p3_normalize: bool = True
-p3_input_template: str = Field(default="{code}. {description}", min_length=1)
+p3_input_template: str = Field(default="{description}", min_length=1)
 p3_batch_size: int = Field(default=32, gt=0)
 p3_max_retries: int = Field(default=2, ge=0)
 # P4 (clustering)

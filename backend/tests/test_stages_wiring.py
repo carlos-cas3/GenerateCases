@@ -202,7 +202,7 @@ def test_document_produces_stories_requirements_and_clusters(real_client_factory
     assert stages["p2"]["runtime_info"]["requirements_count"] == 2
     assert stages["p3"]["llm_runs"] == []
     assert stages["p3"]["runtime_info"]["embedding_model"]["provider"] == "local"
-    assert stages["p3"]["runtime_info"]["embedding_model"]["input_template"] == "{code}. {description}"
+    assert stages["p3"]["runtime_info"]["embedding_model"]["input_template"] == "{description}"
     assert stages["p4"]["warnings"] == []
     assert stages["p4"]["runtime_info"]["clusters"] == 1
     assert stages["p4"]["runtime_info"]["algorithm_info"]["embedding_model"]["model_name"] == "mini"

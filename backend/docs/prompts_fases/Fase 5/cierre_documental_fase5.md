@@ -23,7 +23,7 @@
 
 | Tarea | Archivos | Resumen |
 |---|---|---|
-| T-F5-01 config | `config.py`, `.env.example` | `P3_NORMALIZE` (true), `P3_INPUT_TEMPLATE` (`{code}. {description}`), `P3_BATCH_SIZE` (32), `P3_MAX_RETRIES` (2), `P4_METRIC` (cosine), `P4_MIN_CLUSTER_SIZE` (2, `ge=2`), `P4_MIN_SAMPLES` (1). La plantilla se valida al arrancar: solo `{code}`/`{description}` y `{description}` obligatoria. |
+| T-F5-01 config | `config.py`, `.env.example` | `P3_NORMALIZE` (true), `P3_INPUT_TEMPLATE` (`{description}`), `P3_BATCH_SIZE` (32), `P3_MAX_RETRIES` (2), `P4_METRIC` (cosine), `P4_MIN_CLUSTER_SIZE` (2, `ge=2`), `P4_MIN_SAMPLES` (1). La plantilla se valida al arrancar: solo `{code}`/`{description}` y `{description}` obligatoria. |
 | T-F5-02 caller RPC | `repositories/pipeline_results.py` (puerto), `supabase_pipeline_results.py` (adaptador), `in_memory.py` (fake) | `persist_p4_clusters` reutiliza `_call` (errcodes `23502`/`23503`/`23505`/resto). El fake replica la RPC: id obligatorio, FK de RF, `ON CONFLICT` por cluster `id`, por `(cluster, RF)` y por RF sin cluster; guarda `similarity_to_centroid`. Nuevas colecciones en `InMemoryStore`: `clusters`, `cluster_requirements`, `unassigned_requirements`. |
 | T-F5-03 DI | `pipeline/stages/__init__.py`, `main.py` | `build_p3_config`, `build_p4_config`; `build_real_stages` recibe `embeddings_client` y `clustering_client` y devuelve P1–P4 reales + P5–P7 stubs. `EmbeddingsStubStage`/`ClusteringStubStage` se conservan para `build_stub_stages`. |
 | T-F5-04 P3 | `pipeline/stages/p3_embeddings.py` | Ver §3. No persiste (D-09); `runtime_info.embedding_model` con `provider` (D-34, H-2); sin `llm_runs`. |
@@ -75,7 +75,7 @@ excepciones de la librería) y R-FA-7 (`main.py` cierra solo lo que construyó l
 | 1 — HDBSCAN `min_cluster_size=2`, `min_samples=1` (pisos, por env var) | `config.py`, `build_p4_config` |
 | 2 — métrica `cosine` | `P4_METRIC`; el adaptador fija `algorithm="generic"` |
 | 3 — reintento solo transitorio en P3 | `EmbeddingsStage._run_batch` |
-| 4 — `input_template` `"{code}. {description}"` | `P3_INPUT_TEMPLATE`; viaja en `EmbeddingModelInfo.input_template` |
+| 4 — `input_template` `"{description}"` | `P3_INPUT_TEMPLATE`; viaja en `EmbeddingModelInfo.input_template`. Por defecto solo la descripción: el código del RF es un identificador sin semántica y añade ruido al embedding (el template sigue admitiendo `{code}`). |
 | 5 — `normalize=True` | `P3_NORMALIZE` |
 | H-2 — `provider` aparte | `EmbeddingsStage(provider=…)` |
 | H-3 / R6 — membresía única con HDBSCAN; D-31 diferido | P4 asigna cada RF a un solo cluster |

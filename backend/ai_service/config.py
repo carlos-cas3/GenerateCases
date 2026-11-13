@@ -68,7 +68,10 @@ class Settings(BaseSettings):
 
     # Configuración de P3 (embeddings en lotes). Ver Fase 5 (fase5.md, decisiones 3–5).
     p3_normalize: bool = True
-    p3_input_template: str = Field(default="{code}. {description}", min_length=1)
+    # Solo {description} por defecto: el código del RF (p. ej. RF-001) es un identificador
+    # arbitrario sin semántica y añade ruido al embedding. El template es configurable y
+    # sigue admitiendo {code} (ver validador `_valid_template`).
+    p3_input_template: str = Field(default="{description}", min_length=1)
     p3_batch_size: int = Field(default=32, gt=0)
     p3_max_retries: int = Field(default=2, ge=0)  # solo fallos transitorios del proveedor
 
