@@ -1,6 +1,7 @@
 """Adaptador HDBSCAN de `ClusteringClient` (D-CLU-2). Label -1 = outlier (RF sin cluster)."""
 
 import asyncio
+import math
 from typing import Any
 
 import hdbscan
@@ -59,9 +60,15 @@ def _cluster_sync(request: ClusteringRequest) -> ClusteringResult:
 
 
 def _effective_params(estimator: Any) -> dict[str, Any]:
-    """Parámetros efectivos tras el ajuste (P-3), solo los serializables a JSON."""
+    """Parámetros efectivos tras el ajuste (P-3), solo los serializables a JSON.
+
+    Se descartan los floats no finitos (p. ej. `cluster_selection_epsilon_max=inf`): `jsonb` no
+    admite `Infinity`/`NaN` y romperían el `runtime_info` de P4.
+    """
     return {
         name: value
         for name, value in estimator.get_params(deep=False).items()
-        if isinstance(value, _JSON_SCALARS) and name != "metric"
+        if isinstance(value, _JSON_SCALARS)
+        and name != "metric"
+        and not (isinstance(value, float) and not math.isfinite(value))
     }

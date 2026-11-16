@@ -185,9 +185,13 @@ contrato para una tecnología concreta).
 | `EmbeddingsClient` | `clients/embeddings.py` | `LocalEmbeddingsClient`, `OpenAIEmbeddingsClient` (construidos por `EmbeddingsClientFactory`), `FakeEmbeddingsClient` |
 | `ClusteringClient` | `clients/clustering.py` | `HDBSCANClusteringClient` (construido por `ClusteringClientFactory`), `FakeClusteringClient` |
 
-Los puertos ya existen; las etapas que los consumen (P1 extractor; P3 embeddings; P4
-clustering) siguen siendo stubs hasta Fase 4/5. `main.py` deja los clientes en
-`app.state` para inyectarlos al construir `build_real_stages`.
+Las etapas que los consumen ya son reales (P1 extractor en Fase 4; P3 embeddings y P4
+clustering en Fase 5). `main.py` construye los clientes (factories) y los inyecta en
+`build_real_stages`; también quedan en `app.state` (el LLM, para P6 en la Fase 7), pero las
+etapas nunca los leen de ahí.
+`PipelineResultsRepository` (`repositories/pipeline_results.py`; `SupabasePipelineResultsRepository`,
+`InMemoryPipelineResultsRepository`) expone `persist_p1_user_stories`, `persist_p2_requirements` y
+`persist_p4_clusters`.
 
 ### Reglas
 

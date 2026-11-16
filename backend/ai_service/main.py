@@ -46,7 +46,7 @@ def create_app(
     Repositorios, Storage, clientes LLM/embeddings/clustering y extractor se inyectan en
     tests (R-DI-4); si no, se usan Supabase, las factories (`LLM_PROVIDER`,
     `EMBEDDINGS_PROVIDER`, `CLUSTERING_ALGORITHM`) y los extractores TXT/PDF/DOCX reales.
-    `PIPELINE_STAGES` elige entre P1/P2 reales (`real`) o las siete etapas simuladas (`stub`).
+    `PIPELINE_STAGES` elige entre P1–P4 reales (`real`) o las siete etapas simuladas (`stub`).
     """
     configure_logging()
     app_settings = settings or get_settings()
@@ -114,9 +114,8 @@ def create_app(
                     }
                 )
 
-            # P1 y P2 ya los reciben por constructor (`build_real_stages`); embeddings/clustering
-            # quedan expuestos para P3/P4 (Fase 5) y el LLM para P6 (Fase 7).
-            # Nadie más debe leerlos de aquí.
+            # P1–P4 los reciben por constructor (`build_real_stages`); el LLM queda expuesto para
+            # P6 (Fase 7). Nadie más debe leerlos de aquí.
             app.state.llm_client = llm
             app.state.embeddings_client = embeddings
             app.state.clustering_client = clustering
@@ -134,6 +133,8 @@ def create_app(
                     extractor=document_extractor,
                     llm_client=llm,
                     results=results_repo,
+                    embeddings_client=embeddings,
+                    clustering_client=clustering,
                 )
             else:
                 stages = build_stub_stages(

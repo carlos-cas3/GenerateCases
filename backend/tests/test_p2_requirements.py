@@ -150,6 +150,21 @@ async def test_invalid_batch_is_retried_and_raw_output_logged(context, results, 
     assert result.warnings[0].details == {"batches": {"1": ["LLM_INVALID_OUTPUT", "LLM_INVALID_OUTPUT"]}}
 
 
+async def test_blank_strings_in_lists_are_dropped(context, results) -> None:
+    """D-OLLAMA-4: `[""]` del modelo se trata como `[]` en vez de invalidar el lote."""
+    rf = {**RF_LOCK, "conditions": [""], "unspecified_information": ["  ", "no se indica el canal"]}
+    classification = {**HU1_CLASSIFICATION, "clarification_items": [""]}
+    llm = FakeLlmClient([_json([classification], [{**RF_LOGIN, "business_rules": [""]}, rf]), HU2_OK])
+
+    result = await _stage(llm, results, max_retries=0).run(context)
+
+    assert len(llm.requests) == 2 and not result.warnings
+    login, lock = context.p2_output.requirements
+    assert login.business_rules == () and lock.conditions == ()
+    assert lock.unspecified_information == ("no se indica el canal",)
+    assert context.p2_output.classifications[0].clarification_items == ()
+
+
 async def test_invalid_output_after_retries_fails(context, results) -> None:
     llm = FakeLlmClient(["{}", "{}", "{}"])
 

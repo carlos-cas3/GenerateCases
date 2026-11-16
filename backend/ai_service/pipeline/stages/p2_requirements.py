@@ -3,7 +3,8 @@
 1. Lee `context.p1_output` (solo HU no `invalid`).
 2. Parte las HU en lotes de `P2Config.max_stories_per_call` y, por lote, llama al `LlmClient`
    con el prompt de `prompts/p2.py` (instrucciones como `system`, lote como JSON en `prompt`).
-3. Valida cada respuesta con `P2LlmResponse` (clasificación exacta del lote); reintenta el lote
+3. Valida cada respuesta con `P2LlmResponse` (clasificación exacta del lote), tras quitar los
+   `""` de las listas (D-OLLAMA-4, `docs/llm_ollama_context.md`); reintenta el lote
    hasta `P2Config.max_retries` veces si la salida es inválida o el proveedor falla transitoriamente.
 4. Consolida los lotes en un `P2Output` (códigos `RF-xxx` consecutivos) y lo persiste con
    `persist_p2_requirements`.
@@ -186,7 +187,7 @@ class RequirementsStage(StageBase):
     def _parse(
         self, context: PipelineContext, response: LlmResponse, codes: set[str], number: int, attempt: int
     ) -> P2LlmResponse | None:
-        raw = _strip_code_fence(response.text)
+        raw = _drop_blank_list_items(_strip_code_fence(response.text))
         try:
             return P2LlmResponse.model_validate_json(raw, context={"user_story_codes": codes})
         except ValidationError as exc:
@@ -279,6 +280,28 @@ def _strip_code_fence(text: str) -> str:
     """Quita un bloque ```json … ``` envolvente, habitual en respuestas de LLM."""
     match = _CODE_FENCE.match(text)
     return match.group(1) if match else text.strip()
+
+
+def _drop_blank_list_items(raw: str) -> str:
+    """Quita los strings vacíos de las listas del JSON (`[""]` → `[]`) antes de validar (D-OLLAMA-4).
+
+    Algunos modelos locales rellenan las listas sin datos con `""`, que `NonEmptyStr` rechaza. Es
+    un saneo local de P2: el contrato compartido no cambia. Los campos escalares no se tocan, y si
+    el texto no es JSON se devuelve igual para que la validación informe el error real.
+    """
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return raw
+    return json.dumps(_clean(data), ensure_ascii=False)
+
+
+def _clean(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _clean(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_clean(item) for item in value if not (isinstance(item, str) and not item.strip())]
+    return value
 
 
 def _add(total: int | None, value: int | None) -> int | None:

@@ -283,6 +283,23 @@ async def test_ollama_translates_request_and_response() -> None:
     assert (response.text, response.input_tokens, response.output_tokens, response.latency_ms) == ('{"ok":1}', 30, 6, 250)
 
 
+async def test_ollama_sends_think_in_body_and_num_ctx_in_options() -> None:
+    seen, llm = _ollama(lambda _: httpx.Response(200, json={"message": {"content": "{}"}}))
+    await llm.complete(
+        LlmRequest(prompt="p", model="modelo-x", temperature=0.0, extra={"num_ctx": 16384, "think": False})
+    )
+    body = _body(seen[0])
+    assert body["think"] is False
+    assert body["options"] == {"num_ctx": 16384, "temperature": 0.0}
+
+
+async def test_ollama_omits_think_when_not_given() -> None:
+    seen, llm = _ollama(lambda _: httpx.Response(200, json={"message": {"content": "{}"}}))
+    await llm.complete(LlmRequest(prompt="p", model="modelo-x"))
+    body = _body(seen[0])
+    assert "think" not in body and "options" not in body
+
+
 async def test_ollama_unavailable_is_llm_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused", request=request)

@@ -40,7 +40,7 @@ El clustering hereda la calidad de P2. El prompt actual
 en PDF **y** CSV"). Antes de pasar documentos reales por P3/P4:
 
 - [ ] Verificar con documentos reales que P2 produce RF atómicos (un comportamiento/salida por RF).
-- [ ] Si no, mejorar el prompt de la Fase 4: corregir el ejemplo compuesto y añadir la regla
+- [x] Si no, mejorar el prompt de la Fase 4 *(hecho: commit `85d580c`, sección "Atomicidad de los RF")*: corregir el ejemplo compuesto y añadir la regla
       *"si una HU describe dos o más comportamientos/salidas independientes, extráelos como RF
       separados"* (con ejemplo "antes → después").
 - P4/P5 **no** parten RFs compuestos: asumen atomicidad. Es una mejora de P2, no de la Fase 5.
@@ -66,7 +66,7 @@ Añadir a `ai_service/config.py` (`Settings`), junto a las `p1_*`/`p2_*` existen
 ```python
 # P3 (embeddings)
 p3_normalize: bool = True
-p3_input_template: str = Field(default="{code}. {description}", min_length=1)
+p3_input_template: str = Field(default="{description}", min_length=1)
 p3_batch_size: int = Field(default=32, gt=0)
 p3_max_retries: int = Field(default=2, ge=0)
 # P4 (clustering)

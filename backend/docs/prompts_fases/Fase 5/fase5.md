@@ -1,9 +1,9 @@
 # Fase 5 — Implementación real de P3 (embeddings) y P4 (clustering)
 
-> **Estado:** 🔲 sin empezar — decisiones del responsable **resueltas** (ver §"Decisiones de la
-> fase"); listo para implementar. Los prerequisitos (puertos, adaptadores, contratos, RPC) ya
-> están construidos. Falta verificar el **prerrequisito de atomicidad de P2** antes de pasar
-> documentos reales.
+> **Estado:** ✅ implementada en código y pruebas (464 tests). Detalle en
+> [`cierre_documental_fase5.md`](cierre_documental_fase5.md). Pendiente fuera de código: smoke
+> test de `persist_p4_clusters` contra Supabase y calibrar HDBSCAN / confirmar atomicidad de P2
+> con documentos reales.
 > **Rama de la fase anterior:** rama de trabajo de la Fase 4 (cerrada en código y pruebas;
 > `schema.sql` desplegado en Supabase el 2026-11-11).
 > **Documentos fuente:** `docs/pipeline_roadmap.md`,
@@ -58,9 +58,10 @@ marcadas ✅ ya no bloquean la implementación.
    transitorios: el mismo modelo los reproduciría). Agotados → `EMBEDDINGS_FAILED` (P3 es
    bloqueante → la generación falla). Análogo a P2, que reintenta pero no reintenta
    `LlmContextLengthError`.
-4. **`input_template` default `"{code}. {description}"`** (env var `P3_INPUT_TEMPLATE`). El
-   código da anclaje sin contaminar el contenido; la descripción es el texto a vectorizar. Viaja
-   en `EmbeddingModelInfo.input_template` para reproducibilidad/auditoría.
+4. **`input_template` default `"{description}"`** (env var `P3_INPUT_TEMPLATE`). Por defecto se
+   vectoriza solo la descripción: el código del RF (p. ej. `RF-001`) es un identificador arbitrario
+   sin semántica y añade ruido al embedding. El template sigue admitiendo `{code}` para quien quiera
+   anclarlo. Viaja en `EmbeddingModelInfo.input_template` para reproducibilidad/auditoría.
 5. **`normalize` default `True`** (env var `P3_NORMALIZE`). Necesario para `cosine` y estándar en
    embeddings. Configurable; sin tocar código.
 
@@ -167,7 +168,7 @@ Hoy existen `embeddings_model` (→ `P3Config.model_name`) y `clustering_algorit
 `P4Config.algorithm`). Faltan (con los defaults resueltos):
 
 - **P3Config:** `normalize` (`P3_NORMALIZE=True`), `input_template`
-  (`P3_INPUT_TEMPLATE="{code}. {description}"`), `batch_size` (`P3_BATCH_SIZE`, >0),
+  (`P3_INPUT_TEMPLATE="{description}"`), `batch_size` (`P3_BATCH_SIZE`, >0),
   `P3_MAX_RETRIES` (default 2).
 - **P4Config:** `metric` (`P4_METRIC=cosine`) y los parámetros de HDBSCAN (decisión 1):
   `P4_MIN_CLUSTER_SIZE` (2), `P4_MIN_SAMPLES` (1), volcados en `P4Config.params`.
@@ -181,7 +182,7 @@ Hoy existen `embeddings_model` (→ `P3Config.model_name`) y `clustering_algorit
 
 ### T-F5-01 · Configuración de `P3Config` / `P4Config`
 - Añadir a `ai_service/config.py` las env vars que exigen los contratos, con los defaults
-  resueltos: `P3_NORMALIZE` (True), `P3_INPUT_TEMPLATE` (`"{code}. {description}"`),
+  resueltos: `P3_NORMALIZE` (True), `P3_INPUT_TEMPLATE` (`"{description}"`),
   `P3_BATCH_SIZE` (>0), `P3_MAX_RETRIES` (2); `P4_METRIC` (`cosine`), `P4_MIN_CLUSTER_SIZE` (2),
   `P4_MIN_SAMPLES` (1).
 - Actualizar `.env.example` con los nuevos valores y defaults.
@@ -282,20 +283,20 @@ T-F5-07 (cierre documental + roadmap)
 
 La Fase 5 está completa cuando **todos** estos puntos se cumplen:
 
-- [ ] `EmbeddingsStage` y `ClusteringStage` no heredan de `StubStage` (lógica real).
-- [ ] Un documento con clustering activado produce embeddings reales (en memoria) y clusters
-      reales persistidos en Supabase (P5–P7 siguen como stubs).
-- [ ] El repositorio expone el caller de `persist_p4_clusters` (puerto + adaptador + fake).
-- [ ] `config.py` expone las variables de `P3Config`/`P4Config` (incluidas las de la decisión 1).
-- [ ] P3 no persiste (D-09); P4 persiste vía `persist_p4_clusters`.
-- [ ] P4 nombra clusters como `"Cluster {label}"` (D-A) y calcula/persiste
+- [x] `EmbeddingsStage` y `ClusteringStage` no heredan de `StubStage` (lógica real).
+- [x] Un documento con clustering activado produce embeddings reales (en memoria) y clusters
+      reales persistidos (P5–P7 siguen como stubs). *Verificado E2E con fakes; falta smoke test contra Supabase.*
+- [x] El repositorio expone el caller de `persist_p4_clusters` (puerto + adaptador + fake).
+- [x] `config.py` expone las variables de `P3Config`/`P4Config` (incluidas las de la decisión 1).
+- [x] P3 no persiste (D-09); P4 persiste vía `persist_p4_clusters`.
+- [x] P4 nombra clusters como `"Cluster {label}"` (D-A) y calcula/persiste
       `similarity_to_centroid` (D-B).
-- [ ] R6 (membresía única con HDBSCAN; D-31 diferido) y D-32 (pocos RF → `unassigned`,
+- [x] R6 (membresía única con HDBSCAN; D-31 diferido) y D-32 (pocos RF → `unassigned`,
       `completed` con aviso) funcionan.
-- [ ] P3/P4 quedan `skipped` con `clustering_enabled=false` y con 0 RF (D-29).
-- [ ] Pruebas de P3 (`embeddings_fake`) y P4 (`clustering_fake`) pasan; la suite de contratos
+- [x] P3/P4 quedan `skipped` con `clustering_enabled=false` y con 0 RF (D-29).
+- [x] Pruebas de P3 (`embeddings_fake`) y P4 (`clustering_fake`) pasan; la suite de contratos
       sin regresión.
-- [ ] `pipeline_roadmap.md` actualizado (y corregido) y `cierre_documental_fase5.md` generado.
+- [x] `pipeline_roadmap.md` actualizado (y corregido) y `cierre_documental_fase5.md` generado.
 
 ---
 
@@ -346,7 +347,7 @@ La Fase 5 está completa cuando **todos** estos puntos se cumplen:
 | 2 | Subida de documentos (backend + frontend) | ✅ |
 | 3 | Contratos P1–P6 + `PipelineContext` + prompts P6 | ✅ |
 | 4 | Implementación de P1 (heurística) y P2 (LLM) | ✅ |
-| **5** | **Implementación de P3 (embeddings) y P4 (clustering)** | **🔲** |
+| **5** | **Implementación de P3 (embeddings) y P4 (clustering)** | **✅** |
 | 6 | Implementación de P5 (contexto estructurado) | 🔲 |
 | 7 | Implementación de P6 (generación de casos de prueba) | 🔲 |
 | 8 | Implementación de P7 (evaluación) + cierre (SSE, integración E2E) | 🔲 |

@@ -16,6 +16,7 @@ from ai_service.core.errors import (
     GenerationNotFound,
     InvalidReferenceError,
     InvalidStateTransition,
+    MissingIdentifierError,
 )
 from ai_service.core.time import utc_now
 from ai_service.schemas.generations import (
@@ -43,6 +44,10 @@ class InMemoryStore:
     user_stories: dict[UUID, dict[str, dict[str, Any]]] = field(default_factory=dict)  # gid → code → fila
     requirements: dict[UUID, dict[str, dict[str, Any]]] = field(default_factory=dict)  # gid → code → fila
     story_requirements: dict[UUID, set[tuple[str, str]]] = field(default_factory=dict)  # gid → {(HU, RF)}
+    clusters: dict[UUID, dict[UUID, dict[str, Any]]] = field(default_factory=dict)  # gid → cluster_id → fila
+    # gid → (cluster_id, RF) → fila de `cluster_requirements` (con `similarity_to_centroid`)
+    cluster_requirements: dict[UUID, dict[tuple[UUID, str], dict[str, Any]]] = field(default_factory=dict)
+    unassigned_requirements: dict[UUID, set[str]] = field(default_factory=dict)  # gid → {RF}
     _sequence: itertools.count = field(default_factory=itertools.count)
 
     def add_generation(self, record: GenerationRecord) -> None:
@@ -306,3 +311,41 @@ class InMemoryPipelineResultsRepository:
             existing = requirements.get(row["code"])
             requirements[row["code"]] = {**row, "id": existing["id"] if existing else row["id"]}
             links.update((code, row["code"]) for code in row["user_story_codes"])
+
+    async def persist_p4_clusters(self, generation_id: UUID, payload: dict[str, Any]) -> None:
+        self.calls.append(("persist_p4_clusters", generation_id))
+        clusters_payload = payload.get("clusters", [])
+        if any(not cluster.get("id") for cluster in clusters_payload):
+            raise MissingIdentifierError("todo cluster debe traer su id")  # errcode 23502
+        requirements = self._store.requirements.get(generation_id, {})
+        codes = [a["requirement_code"] for c in clusters_payload for a in c.get("assignments", [])]
+        codes += list(payload.get("unassigned_requirement_codes", []))
+        missing = [code for code in codes if code not in requirements]
+        if missing:
+            raise InvalidReferenceError(f"el RF {missing[0]} no existe en la generación")  # errcode 23503
+
+        clusters = self._store.clusters.setdefault(generation_id, {})
+        members = self._store.cluster_requirements.setdefault(generation_id, {})
+        for cluster in clusters_payload:
+            cluster_id = UUID(str(cluster["id"]))
+            # ON CONFLICT (id) DO UPDATE
+            clusters[cluster_id] = {
+                "id": cluster_id,
+                "name": cluster["name"],
+                "description": cluster.get("description"),
+                "cluster_label": cluster["cluster_label"],
+            }
+            for assignment in cluster.get("assignments", []):
+                # ON CONFLICT (generation_id, cluster_id, requirement_id) DO NOTHING
+                members.setdefault(
+                    (cluster_id, assignment["requirement_code"]),
+                    {
+                        "cluster_id": cluster_id,
+                        "requirement_code": assignment["requirement_code"],
+                        "similarity_to_centroid": assignment.get("similarity_to_centroid"),
+                    },
+                )
+        # ON CONFLICT (generation_id, requirement_id) DO NOTHING
+        self._store.unassigned_requirements.setdefault(generation_id, set()).update(
+            payload.get("unassigned_requirement_codes", [])
+        )
