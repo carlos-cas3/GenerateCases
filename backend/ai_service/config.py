@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     p4_min_cluster_size: int = Field(default=2, ge=2)  # HDBSCAN no admite clusters de 1
     p4_min_samples: int = Field(default=1, ge=1)
 
+    # Configuración de P5 (contexto estructurado). Ver Fase 6 (fase6.md, PA-1 a PA-3).
+    # Umbral del estimado heurístico (caracteres / 4): solo marca la unidad, no la parte (D-F6-6).
+    p5_max_tokens_per_unit: int = Field(default=8000, gt=0)
+    # Versión única de P5: identifica la agrupación y el `output_spec` de P6 (PA-3).
+    p5_instructions_version: str = Field(default="v1", min_length=1)
+    p5_include_prerequisites: bool = False  # D-17: siempre False en v1
+
     @field_validator("pipeline_stub_fail_at_stage", "llm_base_url", "llm_model", mode="before")
     @classmethod
     def _empty_as_none(cls, value: object) -> object:

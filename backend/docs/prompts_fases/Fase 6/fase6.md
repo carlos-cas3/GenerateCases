@@ -1,6 +1,6 @@
 # Fase 6 — Implementación real de P5 (construcción del contexto estructurado)
 
-> **Estado:** 🔲 pendiente de implementación.
+> **Estado:** ✅ implementada (493 tests). Detalle en `cierre_documental_fase6.md`.
 > **Fase anterior:** Fase 5 (P3 embeddings + P4 clustering) — ✅ cerrada en código y pruebas
 > (464 tests). Detalle en `docs/prompts_fases/Fase 5/cierre_documental_fase5.md`.
 > **Documentos fuente:**
@@ -451,21 +451,21 @@ T-F6-05 (cierre documental + roadmap)
 
 La Fase 6 está completa cuando **todos** estos puntos se cumplen:
 
-- [ ] `ContextStage` no hereda de `StubStage` (lógica real implementada).
-- [ ] Con clustering activo, produce `GenerationContext` con `strategy=BY_CLUSTER` y una unidad
+- [x] `ContextStage` no hereda de `StubStage` (lógica real implementada).
+- [x] Con clustering activo, produce `GenerationContext` con `strategy=BY_CLUSTER` y una unidad
       por cluster asignado.
-- [ ] Sin clustering, produce `GenerationContext` con `strategy=BY_USER_STORY` y una unidad por
+- [x] Sin clustering, produce `GenerationContext` con `strategy=BY_USER_STORY` y una unidad por
       HU con RF.
-- [ ] RF sin cluster no generan unidad; se emite aviso `UNASSIGNED_REQUIREMENTS` (D-F6-3).
-- [ ] `exceeds_limit` se calcula y se emite aviso `UNIT_EXCEEDS_TOKEN_LIMIT` cuando aplica.
-- [ ] `prerequisites = ()` en todas las unidades (D-F6-5, v1).
-- [ ] `context_requirements` poblados en `BY_CLUSTER` cuando hay HU compartidas (D-F6-4); vacíos
+- [x] RF sin cluster no generan unidad; se emite aviso `UNASSIGNED_REQUIREMENTS` (D-F6-3).
+- [x] `exceeds_limit` se calcula y se emite aviso `UNIT_EXCEEDS_TOKEN_LIMIT` cuando aplica.
+- [x] `prerequisites = ()` en todas las unidades (D-F6-5, v1).
+- [x] `context_requirements` poblados en `BY_CLUSTER` cuando hay HU compartidas (D-F6-4); vacíos
       en `BY_USER_STORY`.
-- [ ] P5 no persiste nada en BD (D-12 / D-F6-1).
-- [ ] `config.py` expone `P5_MAX_TOKENS_PER_UNIT`, `P5_INSTRUCTIONS_VERSION` y
+- [x] P5 no persiste nada en BD (D-12 / D-F6-1).
+- [x] `config.py` expone `P5_MAX_TOKENS_PER_UNIT`, `P5_INSTRUCTIONS_VERSION` y
       `P5_INCLUDE_PREREQUISITES`.
-- [ ] Pruebas de P5 pasan; wiring E2E actualizado; suite completa sin regresión.
-- [ ] `pipeline_roadmap.md` actualizado y `cierre_documental_fase6.md` generado.
+- [x] Pruebas de P5 pasan; wiring E2E actualizado; suite completa sin regresión.
+- [x] `pipeline_roadmap.md` actualizado y `cierre_documental_fase6.md` generado.
 
 ---
 

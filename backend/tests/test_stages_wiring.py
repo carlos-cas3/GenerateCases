@@ -1,4 +1,4 @@
-"""Cableado de P1–P4 reales (T-F4-04, T-F5-03) y flujo HTTP extremo a extremo con fakes."""
+"""Cableado de P1–P5 reales (T-F4-04, T-F5-03, T-F6-02) y flujo HTTP extremo a extremo con fakes."""
 
 import json
 from collections.abc import Iterator
@@ -17,6 +17,7 @@ from ai_service.core.errors import ClusteringError, ConfigurationError
 from ai_service.main import create_app
 from ai_service.pipeline.stages import (
     ClusteringStage,
+    ContextStage,
     EmbeddingsStage,
     NormalizeStage,
     RequirementsStage,
@@ -25,6 +26,7 @@ from ai_service.pipeline.stages import (
     build_p2_config,
     build_p3_config,
     build_p4_config,
+    build_p5_config,
     build_real_stages,
     build_stub_stages,
 )
@@ -127,7 +129,24 @@ def test_build_p3_and_p4_configs_from_settings() -> None:
     assert (p4.algorithm, p4.metric, p4.params) == ("hdbscan", "euclidean", {"min_cluster_size": 3, "min_samples": 2})
 
 
-def test_build_real_stages_replaces_p1_to_p4(store: InMemoryStore) -> None:
+def test_build_p5_config_from_settings() -> None:
+    defaults = build_p5_config(make_settings())
+    assert (defaults.max_tokens_per_unit, defaults.instructions_version, defaults.include_prerequisites) == (8000, "v1", False)
+
+    custom = build_p5_config(
+        make_settings(p5_max_tokens_per_unit=1200, p5_instructions_version="v2", p5_include_prerequisites=True)
+    )
+    assert (custom.max_tokens_per_unit, custom.instructions_version, custom.include_prerequisites) == (1200, "v2", True)
+
+
+def test_p5_settings_reject_invalid_values() -> None:
+    with pytest.raises(ValueError):
+        make_settings(p5_max_tokens_per_unit=0)
+    with pytest.raises(ValueError):
+        make_settings(p5_instructions_version="")
+
+
+def test_build_real_stages_replaces_p1_to_p5(store: InMemoryStore) -> None:
     stages = build_real_stages(
         make_settings(llm_model="m"),
         documents=InMemoryDocumentsRepository(store),
@@ -140,10 +159,10 @@ def test_build_real_stages_replaces_p1_to_p4(store: InMemoryStore) -> None:
     )
 
     assert [s.key.value for s in stages] == ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
-    real = (NormalizeStage, RequirementsStage, EmbeddingsStage, ClusteringStage)
-    for stage, cls in zip(stages[:4], real, strict=True):
+    real = (NormalizeStage, RequirementsStage, EmbeddingsStage, ClusteringStage, ContextStage)
+    for stage, cls in zip(stages[:5], real, strict=True):
         assert isinstance(stage, cls) and not isinstance(stage, StubStage)
-    assert all(isinstance(s, StubStage) for s in stages[4:])
+    assert all(isinstance(s, StubStage) for s in stages[5:])
     assert stages[2].requires_clustering and stages[3].requires_clustering
 
 
@@ -231,6 +250,11 @@ def test_document_produces_stories_requirements_and_clusters(real_client_factory
     assert [row["name"] for row in store.clusters[gid].values()] == ["Cluster 0"]
     assert {code for (_, code) in store.cluster_requirements[gid]} == {"RF-001", "RF-002"}
     assert store.unassigned_requirements[gid] == set()
+    # P5 (Fase 6): una unidad por cluster, sin persistir nada (D-12).
+    assert stages["p5"]["warnings"] == []
+    assert stages["p5"]["runtime_info"]["strategy"] == "by_cluster"
+    assert stages["p5"]["runtime_info"]["units"] == 1
+    assert stages["p5"]["runtime_info"]["requirements_covered"] == 2
 
 
 def test_without_clustering_p3_and_p4_are_skipped(real_client_factory, store: InMemoryStore) -> None:
@@ -246,6 +270,8 @@ def test_without_clustering_p3_and_p4_are_skipped(real_client_factory, store: In
     assert stages["p3"]["status"] == stages["p4"]["status"] == "skipped"
     assert all(stages[k]["status"] == "completed" for k in ("p1", "p2", "p5", "p6", "p7"))
     assert store.clusters == {}
+    assert stages["p5"]["runtime_info"]["strategy"] == "by_user_story"
+    assert stages["p5"]["runtime_info"]["units"] == 1
 
 
 def test_single_requirement_completes_with_insufficient_requirements(real_client_factory, store: InMemoryStore) -> None:
@@ -261,6 +287,10 @@ def test_single_requirement_completes_with_insufficient_requirements(real_client
     assert [w["code"] for w in stages["p4"]["warnings"]] == ["INSUFFICIENT_REQUIREMENTS"]
     gid = next(iter(store.unassigned_requirements))
     assert store.unassigned_requirements[gid] == {"RF-001"}
+    # D-F6-3: el RF sin cluster no forma unidad; P5 avisa y la generación sigue `completed`.
+    assert stages["p5"]["status"] == "completed"
+    assert [w["code"] for w in stages["p5"]["warnings"]] == ["UNASSIGNED_REQUIREMENTS"]
+    assert stages["p5"]["runtime_info"]["units"] == 0
 
 
 def test_clustering_failure_fails_generation_at_p4(real_client_factory) -> None:
