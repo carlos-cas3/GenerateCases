@@ -1,5 +1,7 @@
 """Etapas P1–P7 y su construcción a partir de la configuración."""
 
+from typing import Any
+
 from ai_service.clients.clustering import ClusteringClient
 from ai_service.clients.embeddings import EmbeddingsClient
 from ai_service.clients.extractor import DocumentTextExtractor
@@ -58,13 +60,25 @@ def build_p1_config(settings: Settings) -> P1Config:
     )
 
 
+def build_llm_parameters(settings: Settings) -> dict[str, Any]:
+    """Parámetros de generación del LLM (D-OLLAMA-2).
+
+    `temperature` vale para todos los proveedores. `num_ctx` y `think` son propios de Ollama:
+    OpenAI y Anthropic vuelcan `extra` tal cual en el SDK y los rechazarían.
+    """
+    parameters: dict[str, Any] = {"temperature": settings.llm_temperature}
+    if settings.llm_provider == "ollama":
+        parameters |= {"num_ctx": settings.llm_num_ctx, "think": settings.llm_think}
+    return parameters
+
+
 def build_p2_config(settings: Settings) -> P2Config:
     """`P2Config` desde `Settings`. Sin `LLM_MODEL` el servicio no arranca (`ConfigurationError`)."""
     if not settings.llm_model:
         raise ConfigurationError("LLM_MODEL es obligatoria para ejecutar P2 (PIPELINE_STAGES=real).")
     return P2Config(
         prompt_version=settings.p2_prompt_version,
-        llm=LlmSettings(provider=settings.llm_provider, model=settings.llm_model, parameters={}),
+        llm=LlmSettings(provider=settings.llm_provider, model=settings.llm_model, parameters=build_llm_parameters(settings)),
         max_stories_per_call=settings.p2_max_stories_per_call,
         max_retries=settings.p2_max_retries,
     )
@@ -134,6 +148,7 @@ __all__ = [
     "ClusteringStage",
     "build_stub_stages",
     "build_real_stages",
+    "build_llm_parameters",
     "build_p1_config",
     "build_p2_config",
     "build_p3_config",

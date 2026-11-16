@@ -195,7 +195,9 @@ Cada adaptador sigue el mismo esquema:
 - Endpoint: `POST {base_url}/api/chat` con `"stream": false`; `system` va como
   mensaje `role: "system"`
 - El modelo se pasa en el body (`"model": request.model`); `max_tokens` →
-  `options.num_predict`; `temperature` y `extra` → `options`
+  `options.num_predict`; `temperature` y `extra` → `options` (incluido `num_ctx`).
+  Excepción: `think` se saca de `extra` y va en el **body**, no en `options`
+  (D-OLLAMA-3, ver [`llm_ollama_context.md`](llm_ollama_context.md))
 - Errores: conexión rechazada → `LlmError` con mensaje claro sobre Ollama no
   disponible; HTTP 429 → `LlmRateLimitError`; otro HTTP de error → `LlmError`;
   cuerpo no JSON o sin `message.content` → `LlmInvalidResponseError`
@@ -317,6 +319,21 @@ ser `None`.
 > que se ejecuta en el arranque, igual que `create_supabase_client()`. Un valor
 > vacío en `.env` (`LLM_API_KEY=`, `LLM_BASE_URL=`) cuenta como ausente.
 
+Opciones de generación añadidas después (D-OLLAMA-1, ver
+[`llm_ollama_context.md`](llm_ollama_context.md)):
+
+```python
+llm_model: str | None = None                          # LLM_MODEL → LlmSettings.model (D-LLM-3)
+llm_num_ctx: int = Field(default=16384, gt=0)         # LLM_NUM_CTX, solo ollama
+llm_think: bool = False                               # LLM_THINK, solo ollama
+llm_temperature: float = Field(default=0.0, ge=0)     # LLM_TEMPERATURE, todos los proveedores
+```
+
+`build_llm_parameters` (`pipeline/stages/__init__.py`) las vuelca en
+`LlmSettings.parameters`: `temperature` siempre; `num_ctx` y `think` solo con
+`LLM_PROVIDER=ollama`, porque OpenAI y Anthropic pasan `extra` tal cual al SDK y
+los rechazarían.
+
 ---
 
 ## Cómo se inyecta en las etapas
@@ -387,6 +404,8 @@ Resolución (cierre de Fase 3):
   `role: "system"`.
 - **D-LLM-2 — resuelta.** `httpx` directo: ya es dependencia (transitiva de
   supabase, openai y anthropic) y permite probar con `httpx.MockTransport`.
-- **D-LLM-3 — abierta.** No afecta a la factory: el modelo viaja en cada
-  `LlmRequest`. Se decide en Fase 4 al construir `P2Config`/`P6Config`.
-  Propuesta: `LLM_MODEL` en `Settings` como fuente de `LlmSettings.model`.
+- **D-LLM-3 — resuelta.** `LLM_MODEL` en `Settings` es la fuente de
+  `LlmSettings.model`; `build_p2_config` exige que esté definida.
+- **D-OLLAMA-1..4 — resueltas.** `LLM_NUM_CTX`/`LLM_THINK`/`LLM_TEMPERATURE`,
+  su paso a `LlmSettings.parameters`, `think` en el body de Ollama y el saneo de
+  `[""]` en P2. Detalle en [`llm_ollama_context.md`](llm_ollama_context.md).

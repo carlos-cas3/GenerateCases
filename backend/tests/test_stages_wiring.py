@@ -99,6 +99,22 @@ def test_build_configs_from_settings() -> None:
     )
 
 
+def test_llm_settings_defaults() -> None:
+    s = make_settings()
+    assert (s.llm_num_ctx, s.llm_think, s.llm_temperature) == (16384, False, 0.0)
+
+
+def test_build_p2_config_passes_ollama_parameters() -> None:
+    settings = make_settings(llm_model="qwen", llm_provider="ollama", llm_num_ctx=8192, llm_think=True, llm_temperature=0.2)
+    assert build_p2_config(settings).llm.parameters == {"temperature": 0.2, "num_ctx": 8192, "think": True}
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+def test_build_p2_config_omits_ollama_only_parameters(provider: str) -> None:
+    settings = make_settings(llm_model="m", llm_provider=provider)
+    assert build_p2_config(settings).llm.parameters == {"temperature": 0.0}
+
+
 def test_build_p3_and_p4_configs_from_settings() -> None:
     settings = make_settings(
         embeddings_model="mpnet", p3_normalize=False, p3_input_template="{description}", p3_batch_size=8,

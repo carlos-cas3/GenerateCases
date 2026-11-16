@@ -16,7 +16,8 @@ class OllamaLlmClient:
 
     Recibe un `httpx.AsyncClient` con `base_url` y `timeout` ya configurados
     (lo crea `LlmClientFactory`). `max_tokens`, `temperature` y `extra` van en
-    `options` (`num_predict`, `temperature`, …), que es donde Ollama los espera.
+    `options` (`num_predict`, `temperature`, `num_ctx`, …), que es donde Ollama los espera;
+    `think` sale de `extra` y va en el body (D-OLLAMA-3).
     """
 
     def __init__(self, client: httpx.AsyncClient) -> None:
@@ -29,11 +30,15 @@ class OllamaLlmClient:
         messages.append({"role": "user", "content": request.prompt})
 
         options: dict[str, Any] = dict(request.extra)
+        # `think` es un campo de primer nivel de `/api/chat`, no una opción del modelo (D-OLLAMA-3).
+        think = options.pop("think", None)
         if request.max_tokens is not None:
             options["num_predict"] = request.max_tokens
         if request.temperature is not None:
             options["temperature"] = request.temperature
         body: dict[str, Any] = {"model": request.model, "messages": messages, "stream": False}
+        if think is not None:
+            body["think"] = think
         if options:
             body["options"] = options
 

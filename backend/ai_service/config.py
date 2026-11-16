@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None  # obligatoria para ollama; opcional (proxy) para el resto
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_model: str | None = None  # nombre del modelo concreto para P2/P6 (LlmSettings.model)
+    # Opciones de generación (docs/llm_ollama_context.md, D-OLLAMA-1). `temperature` aplica a
+    # todos los proveedores; `num_ctx` y `think` solo se envían con `llm_provider=ollama`
+    # (sin ellos Ollama usa num_ctx=4096 y thinking activo, y el JSON de P2 sale truncado).
+    llm_num_ctx: int = Field(default=16384, gt=0)
+    llm_think: bool = False
+    llm_temperature: float = Field(default=0.0, ge=0)
 
     # Configuración de P1 (camino B: heurística, sin LLM). Ver plantilla_hu.md (T-F4-02).
     p1_rules_version: str = Field(default="v1", min_length=1)

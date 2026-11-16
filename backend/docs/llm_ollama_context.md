@@ -1,6 +1,12 @@
 # Ajuste del contexto y opciones de Ollama para P2/P6
 
-> **Estado:** propuesta de mejora (pendiente de implementar). Surge al probar el pipeline
+> **Estado:** implementado D-OLLAMA-1..4 (D-OLLAMA-5 sigue diferido). Ajuste respecto a la
+> propuesta: `num_ctx` y `think` solo se añaden a `LlmSettings.parameters` con
+> `LLM_PROVIDER=ollama` (`build_llm_parameters`); OpenAI/Anthropic reciben solo `temperature`,
+> porque vuelcan `extra` tal cual en el SDK. Verificado contra `qwen3.5:latest`: el lote que antes
+> se truncaba (`done_reason=length`) ahora valida.
+>
+> Surge al probar el pipeline
 > real (P1→P4) con `qwen3.5:latest` (9B) en Ollama: P2 falla con `LLM_INVALID_OUTPUT`.
 > **Alcance:** el cliente LLM (`ai_service/clients/ollama_llm.py`, factory y `config.py`) y el
 > saneamiento de la salida de P2. No toca P3/P4. Actualiza decisiones de
