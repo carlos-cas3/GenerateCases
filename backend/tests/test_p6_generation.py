@@ -159,7 +159,7 @@ async def test_context_requirements_are_filtered_and_the_case_is_persisted() -> 
     assert store.test_cases[ctx.generation_id]["CP-001"]["requirement_codes"] == ["RF-001"]
     assert _warning_codes(result) == ["REQUIREMENT_CODES_FILTERED"]
     assert result.warnings[0].details == {
-        "units": {"U-001": {"filtered_codes": ["RF-003"], "filtered_count": 3, "dropped_cases": 1}}
+        "units": {"U-001": {"filtered_codes": ["RF-003"], "filtered_occurrences": 3, "dropped_cases": 1}}
     }
 
 

@@ -348,7 +348,7 @@ class GenerationStage(StageBase):
         filtered = {
             r.unit.unit_id: {
                 "filtered_codes": sorted(set(r.filtered_codes)),
-                "filtered_count": len(r.filtered_codes),
+                "filtered_occurrences": len(r.filtered_codes),
                 "dropped_cases": r.dropped_cases,
             }
             for r in results
