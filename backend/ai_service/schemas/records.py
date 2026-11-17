@@ -52,6 +52,7 @@ class GenerationRecord(BaseModel):
     clustering_enabled: bool
     method_type: str
     config_snapshot: dict[str, Any] = Field(default_factory=dict)
+    summary: dict[str, Any] | None = None  # columna `summary jsonb` (D-F7-8)
     error_message: str | None = None
     created_at: datetime
     started_at: datetime | None = None

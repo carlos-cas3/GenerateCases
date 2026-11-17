@@ -7,6 +7,7 @@ from uuid import UUID
 
 from ai_service.schemas.generations import (
     GenerationStatus,
+    GenerationSummary,
     LlmRun,
     StageKey,
     StageStatus,
@@ -86,6 +87,17 @@ class GenerationsRepository(Protocol):
 
         Los campos en `None` no se modifican.
         """
+        ...
+
+    async def build_summary(self, generation_id: UUID, *, failed_units: int = 0) -> GenerationSummary:
+        """Cuenta HU, RF, clusters y casos persistidos de la generación (D-F7-8).
+
+        `failed_units` no está en la BD: lo aporta quien llama desde `P6Output.failed_units`.
+        """
+        ...
+
+    async def update_summary(self, generation_id: UUID, summary: GenerationSummary) -> None:
+        """Escribe `generations.summary`. Lanza `GenerationNotFound` si la generación no existe."""
         ...
 
     async def delete(self, generation_id: UUID) -> None:

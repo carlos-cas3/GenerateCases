@@ -1,6 +1,7 @@
 # Fase 7 — Implementación real de P6 (generación de casos de prueba)
 
-> **Estado:** 🔲 pendiente de implementación
+> **Estado:** ✅ implementada en código y pruebas (529 tests). Pendiente fuera de código: primera
+> iteración de calibración con el pipeline real. Ver [`cierre_documental_fase7.md`](cierre_documental_fase7.md).
 > **Fase anterior:** Fase 6 (P5 contexto estructurado) — ✅ cerrada (493 tests).
 > Detalle en `docs/prompts_fases/Fase 6/cierre_documental_fase6.md`.
 > **Documentos fuente:**

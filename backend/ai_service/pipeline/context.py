@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from ai_service.pipeline.contracts.p3 import P3Output
     from ai_service.pipeline.contracts.p4 import P4Output
     from ai_service.pipeline.contracts.p5 import P5Output
+    from ai_service.pipeline.contracts.p6 import P6Output
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +75,7 @@ class PipelineContext:
     - P5 lee  ``p1_output``, ``p2_output``, ``p4_output`` (p4_output puede ser None)
     - P6 lee  ``p5_output``
     - P7 lee  ``p2_output``, ``p6_output``
+    - ``PipelineRunService`` lee ``p6_output`` para el summary (D-F7-8)
     """
 
     # --- arranque (no se modifican tras la construcción) ---
@@ -87,3 +89,4 @@ class PipelineContext:
     p3_output: P3Output | None = field(default=None)
     p4_output: P4Output | None = field(default=None)
     p5_output: P5Output | None = field(default=None)
+    p6_output: P6Output | None = field(default=None)

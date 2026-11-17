@@ -15,7 +15,6 @@
 import asyncio
 import json
 import logging
-import re
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -40,6 +39,12 @@ from ai_service.pipeline.contracts.p2 import (
 )
 from ai_service.pipeline.prompts.p2 import ResolvedP2Prompt
 from ai_service.pipeline.stages.base import StageBase, StageError, StageResult, StubStage
+from ai_service.pipeline.stages.llm_output import (
+    RAW_LOG_LIMIT,
+    add_optional as _add,
+    drop_blank_list_items as _drop_blank_list_items,
+    strip_code_fence as _strip_code_fence,
+)
 from ai_service.repositories.pipeline_results import PipelineResultsRepository
 from ai_service.schemas.generations import LlmRun, StageKey, StageWarning
 
@@ -47,8 +52,6 @@ logger = logging.getLogger(__name__)
 
 PromptResolver = Callable[[str], ResolvedP2Prompt]
 
-RAW_LOG_LIMIT = 2000  # caracteres de la salida cruda del LLM que se registran ante un lote inválido
-_CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL | re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -294,40 +297,6 @@ class RequirementsStage(StageBase):
                 )
             )
         return tuple(warnings)
-
-
-def _strip_code_fence(text: str) -> str:
-    """Quita un bloque ```json … ``` envolvente, habitual en respuestas de LLM."""
-    match = _CODE_FENCE.match(text)
-    return match.group(1) if match else text.strip()
-
-
-def _drop_blank_list_items(raw: str) -> str:
-    """Quita los strings vacíos de las listas del JSON (`[""]` → `[]`) antes de validar (D-OLLAMA-4).
-
-    Algunos modelos locales rellenan las listas sin datos con `""`, que `NonEmptyStr` rechaza. Es
-    un saneo local de P2: el contrato compartido no cambia. Los campos escalares no se tocan, y si
-    el texto no es JSON se devuelve igual para que la validación informe el error real.
-    """
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return raw
-    return json.dumps(_clean(data), ensure_ascii=False)
-
-
-def _clean(value: object) -> object:
-    if isinstance(value, dict):
-        return {key: _clean(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_clean(item) for item in value if not (isinstance(item, str) and not item.strip())]
-    return value
-
-
-def _add(total: int | None, value: int | None) -> int | None:
-    if value is None:
-        return total
-    return (total or 0) + value
 
 
 class RequirementsStubStage(StubStage):

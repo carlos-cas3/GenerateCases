@@ -22,6 +22,7 @@ from ai_service.core.time import utc_now
 from ai_service.schemas.generations import (
     ACTIVE_GENERATION_STATUSES,
     GenerationStatus,
+    GenerationSummary,
     LlmRun,
     StageKey,
     StageStatus,
@@ -48,6 +49,8 @@ class InMemoryStore:
     # gid → (cluster_id, RF) → fila de `cluster_requirements` (con `similarity_to_centroid`)
     cluster_requirements: dict[UUID, dict[tuple[UUID, str], dict[str, Any]]] = field(default_factory=dict)
     unassigned_requirements: dict[UUID, set[str]] = field(default_factory=dict)  # gid → {RF}
+    # gid → code → fila de `test_cases` (con `steps` y `requirement_codes`, como el payload de P6)
+    test_cases: dict[UUID, dict[str, dict[str, Any]]] = field(default_factory=dict)
     _sequence: itertools.count = field(default_factory=itertools.count)
 
     def add_generation(self, record: GenerationRecord) -> None:
@@ -244,6 +247,22 @@ class InMemoryGenerationsRepository:
         if runtime_info is not None:
             stage.runtime_info = dict(runtime_info)
 
+    async def build_summary(self, generation_id: UUID, *, failed_units: int = 0) -> GenerationSummary:
+        store = self._store
+        return GenerationSummary(
+            user_stories_count=len(store.user_stories.get(generation_id, {})),
+            requirements_count=len(store.requirements.get(generation_id, {})),
+            clusters_count=len(store.clusters.get(generation_id, {})),
+            test_cases_count=len(store.test_cases.get(generation_id, {})),
+            test_cases_failed_units=failed_units,
+        )
+
+    async def update_summary(self, generation_id: UUID, summary: GenerationSummary) -> None:
+        record = self._store.generations.get(generation_id)
+        if record is None:
+            raise GenerationNotFound()
+        record.summary = summary.model_dump(mode="json")
+
     async def delete(self, generation_id: UUID) -> None:
         record = self._store.generations.get(generation_id)
         if record is None:
@@ -349,3 +368,29 @@ class InMemoryPipelineResultsRepository:
         self._store.unassigned_requirements.setdefault(generation_id, set()).update(
             payload.get("unassigned_requirement_codes", [])
         )
+
+    async def persist_p6_unit(self, generation_id: UUID, payload: dict[str, Any]) -> None:
+        self.calls.append(("persist_p6_unit", generation_id))
+        cases_payload = payload.get("test_cases", [])
+        if any(not case.get("id") for case in cases_payload):
+            raise MissingIdentifierError("todo caso de prueba debe traer su id")  # errcode 23502
+        requirements = self._store.requirements.get(generation_id, {})
+        missing = [code for case in cases_payload for code in case.get("requirement_codes", []) if code not in requirements]
+        if missing:
+            raise InvalidReferenceError(f"el RF {missing[0]} no existe en la generación")  # errcode 23503
+
+        cases = self._store.test_cases.setdefault(generation_id, {})
+        for case in cases_payload:
+            existing = cases.get(case["code"])
+            if existing is None:
+                cases[case["code"]] = {**case, "steps": list(case.get("steps", [])),
+                                       "requirement_codes": list(case.get("requirement_codes", []))}
+                continue
+            # ON CONFLICT (generation_id, code) DO UPDATE de los campos del caso; pasos y vínculos
+            # existentes se conservan (DO NOTHING) y solo se añaden los nuevos.
+            existing.update({k: case.get(k) for k in ("title", "objective", "preconditions", "test_data", "expected_result")})
+            numbers = {step["step_number"] for step in existing["steps"]}
+            existing["steps"].extend(step for step in case.get("steps", []) if step["step_number"] not in numbers)
+            existing["requirement_codes"].extend(
+                code for code in case.get("requirement_codes", []) if code not in existing["requirement_codes"]
+            )

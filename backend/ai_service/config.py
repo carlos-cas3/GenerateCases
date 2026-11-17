@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_service_role_key: SecretStr | None = None
 
-    # `real`: P1–P4 reales, P5–P7 stubs (Fase 5). `stub`: las 7 simuladas
+    # `real`: P1–P6 reales, P7 stub (Fase 7). `stub`: las 7 simuladas
     # (arranque sin LLM/Supabase de resultados y tests del orquestador).
     pipeline_stages: PipelineStagesLiteral = "real"
     pipeline_stub_delay_seconds: float = Field(default=2.0, ge=0)
@@ -92,6 +92,16 @@ class Settings(BaseSettings):
     # Versión única de P5: identifica la agrupación y el `output_spec` de P6 (PA-3).
     p5_instructions_version: str = Field(default="v1", min_length=1)
     p5_include_prerequisites: bool = False  # D-17: siempre False en v1
+
+    # Configuración de P6 (generación de casos). Ver Fase 7 (fase7.md, D-F7-1 a D-F7-5).
+    # Versión de los prompts `contexto`/`contexto_sin_clustering`; v2 = revisión T-F7-06.
+    p6_prompt_version: str = Field(default="v2", min_length=1)
+    p6_max_retries: int = Field(default=1, ge=0)  # por unidad; no se reintenta LLM_CONTEXT_LENGTH
+    # Proporción máxima de unidades fallidas sin que la generación quede `failed` (0.0 = ninguna).
+    p6_failure_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Tope de casos por unidad: min(multiplicador × RF objetivo, absoluto).
+    p6_max_cases_multiplier: int = Field(default=3, gt=0)
+    p6_max_cases_absolute: int = Field(default=50, gt=0)
 
     @field_validator("pipeline_stub_fail_at_stage", "llm_base_url", "llm_model", mode="before")
     @classmethod

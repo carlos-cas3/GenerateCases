@@ -114,8 +114,8 @@ def create_app(
                     }
                 )
 
-            # P1–P4 los reciben por constructor (`build_real_stages`); el LLM queda expuesto para
-            # P6 (Fase 7). Nadie más debe leerlos de aquí.
+            # Las etapas los reciben por constructor (`build_real_stages`; P2 y P6 comparten el LLM).
+            # Nadie más debe leerlos de aquí.
             app.state.llm_client = llm
             app.state.embeddings_client = embeddings
             app.state.clustering_client = clustering

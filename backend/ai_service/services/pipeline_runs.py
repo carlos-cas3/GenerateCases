@@ -9,7 +9,7 @@ Tabla de transiciones aplicada (pipeline-orchestration.md §5):
 | stage_completed    | running → completed      | —                                            |
 | stage_skipped      | pending → skipped        | —                                            |
 | stage_failed       | running → failed + error | —                                            |
-| pipeline_completed | —                        | running → completed (si 7 etapas finales ok) |
+| pipeline_completed | —                        | summary (D-F7-8); running → completed (si 7 etapas finales ok) |
 
 Una etapa no bloqueante (P7) puede quedar `failed` en una generación `completed` (D-33).
 | pipeline_failed    | —                        | queued|running → failed + error, completed_at|
@@ -54,9 +54,12 @@ _FINAL_STAGE_STATUSES = frozenset({StageStatus.COMPLETED, StageStatus.SKIPPED})
 class RepositoryProgressReporter:
     """`ProgressReporter` que persiste cada evento a través del repositorio."""
 
-    def __init__(self, repository: GenerationsRepository, generation_id: UUID) -> None:
+    def __init__(
+        self, repository: GenerationsRepository, generation_id: UUID, context: PipelineContext | None = None
+    ) -> None:
         self._repository = repository
         self._generation_id = generation_id
+        self._context = context
 
     async def report(self, event: PipelineEvent) -> None:
         repo = self._repository
@@ -86,6 +89,7 @@ class RepositoryProgressReporter:
                 )
             case PipelineCompleted():
                 await self._ensure_all_stages_final()
+                await self._write_summary()
                 await repo.update_generation_status(
                     gid, expected={GenerationStatus.RUNNING}, status=GenerationStatus.COMPLETED,
                     completed_at=event.occurred_at,
@@ -95,6 +99,16 @@ class RepositoryProgressReporter:
                     gid, expected=ACTIVE_GENERATION_STATUSES, status=GenerationStatus.FAILED,
                     completed_at=event.occurred_at, error_message=event.error_message,
                 )
+
+    async def _write_summary(self) -> None:
+        """D-F7-8: conteos desde el repositorio + unidades fallidas de `P6Output` (si P6 corrió).
+
+        Se escribe antes de pasar a `completed` para que nadie vea la generación completada sin summary.
+        """
+        p6_output = self._context.p6_output if self._context is not None else None
+        failed_units = len(p6_output.failed_units) if p6_output is not None else 0
+        summary = await self._repository.build_summary(self._generation_id, failed_units=failed_units)
+        await self._repository.update_summary(self._generation_id, summary)
 
     async def _ensure_all_stages_final(self) -> None:
         """Una generación solo se completa si sus 7 etapas están `completed` o `skipped`.
@@ -132,7 +146,7 @@ class PipelineRunService:
                 started_at=utc_now(),
             )
             logger.info("Pipeline iniciado generation_id=%s", generation_id)
-            reporter = RepositoryProgressReporter(self._repository, generation_id)
+            reporter = RepositoryProgressReporter(self._repository, generation_id, context)
             await PipelineOrchestrator(self._stages, reporter).run(context)
         except Exception:
             logger.exception("Error no previsto en el pipeline generation_id=%s", generation_id)

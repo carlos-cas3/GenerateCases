@@ -43,6 +43,9 @@ class SupabasePipelineResultsRepository:
     async def persist_p4_clusters(self, generation_id: UUID, payload: dict[str, Any]) -> None:
         await self._call("persist_p4_clusters", generation_id, payload)
 
+    async def persist_p6_unit(self, generation_id: UUID, payload: dict[str, Any]) -> None:
+        await self._call("persist_p6_unit", generation_id, payload)
+
     async def _call(self, rpc_name: str, generation_id: UUID, payload: Any) -> None:
         params = {"p_generation_id": str(generation_id), "p_payload": payload}
         try:

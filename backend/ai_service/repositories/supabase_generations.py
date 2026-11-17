@@ -16,6 +16,7 @@ from ai_service.core.errors import DocumentNotFound, GenerationInProgress, Gener
 from ai_service.schemas.generations import (
     ACTIVE_GENERATION_STATUSES,
     GenerationStatus,
+    GenerationSummary,
     LlmRun,
     StageKey,
     StageStatus,
@@ -229,6 +230,36 @@ class SupabaseGenerationsRepository:
                 status.value,
             )
             raise InvalidStateTransition(f"stage {generation_id}/{stage_key.value}: {expected.value} -> {status.value}")
+
+    async def build_summary(self, generation_id: UUID, *, failed_units: int = 0) -> GenerationSummary:
+        user_stories, requirements, clusters, test_cases = [
+            await self._count(table, generation_id)
+            for table in ("user_stories", "functional_requirements", "clusters", "test_cases")
+        ]
+        return GenerationSummary(
+            user_stories_count=user_stories,
+            requirements_count=requirements,
+            clusters_count=clusters,
+            test_cases_count=test_cases,
+            test_cases_failed_units=failed_units,
+        )
+
+    async def _count(self, table: str, generation_id: UUID) -> int:
+        response = await self._run(
+            lambda: self._client.table(table)
+            .select("id", count=CountMethod.exact, head=True)
+            .eq("generation_id", str(generation_id))
+            .execute()
+        )
+        return response.count or 0
+
+    async def update_summary(self, generation_id: UUID, summary: GenerationSummary) -> None:
+        payload = {"summary": summary.model_dump(mode="json")}
+        response = await self._run(
+            lambda: self._client.table("generations").update(payload).eq("id", str(generation_id)).execute()
+        )
+        if not response.data:
+            raise GenerationNotFound()
 
     async def delete(self, generation_id: UUID) -> None:
         response = await self._run(
