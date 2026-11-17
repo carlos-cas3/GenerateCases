@@ -100,21 +100,79 @@ def main() -> None:
             )
         print()
 
-    # 3) Casos persistidos
+    # 3) Casos persistidos con su trazabilidad RF↔CP y pasos.
+    # La relación RF↔CP vive en `requirement_test_cases` (no en `test_cases`),
+    # así que se junta con `functional_requirements` (id -> código) en Python.
     print("CASOS DE PRUEBA PERSISTIDOS")
     print("-" * 80)
-    cases = client.table("test_cases").select("*").eq("generation_id", gen_id).order("code").execute().data or []
+
+    fr_rows = (
+        client.table("functional_requirements")
+        .select("id,code")
+        .eq("generation_id", gen_id)
+        .execute().data
+        or []
+    )
+    rf_by_id = {r["id"]: r["code"] for r in fr_rows}
+
+    rtc_rows = (
+        client.table("requirement_test_cases")
+        .select("test_case_id,requirement_id,relation_status")
+        .eq("generation_id", gen_id)
+        .execute().data
+        or []
+    )
+    rfs_by_case: dict[str, list[str]] = {}
+    status_by_case: dict[str, dict[str, str]] = {}
+    for r in rtc_rows:
+        tc_id = r["test_case_id"]
+        rf_code = rf_by_id.get(r["requirement_id"]) or str(r["requirement_id"])
+        rfs_by_case.setdefault(tc_id, []).append(rf_code)
+        if r.get("relation_status") and r["relation_status"] != "pending":
+            status_by_case.setdefault(tc_id, {})[rf_code] = r["relation_status"]
+
+    steps_rows = (
+        client.table("test_steps")
+        .select("test_case_id,step_number,action,expected_result")
+        .eq("generation_id", gen_id)
+        .order("step_number")
+        .execute().data
+        or []
+    )
+    steps_by_case: dict[str, list[dict]] = {}
+    for s in steps_rows:
+        steps_by_case.setdefault(s["test_case_id"], []).append(s)
+
+    cases = (
+        client.table("test_cases")
+        .select("*")
+        .eq("generation_id", gen_id)
+        .order("code")
+        .execute().data
+        or []
+    )
+
     if not cases:
         print("  (sin casos)")
-    else:
-        print(f"  columnas: {list(cases[0].keys())}")
     for c in cases:
-        code = c.get("code") or c.get("id") or "?"
-        rc = c.get("requirement_codes")
+        tc_id = c.get("id")
+        code = c.get("code") or "?"
+        rf_codes = sorted(set(rfs_by_case.get(tc_id, [])))
+        steps = steps_by_case.get(tc_id, [])
         title = (c.get("title") or "").replace("\n", " ")
-        print(f"  {code:<10} requirement_codes={rc}")
+        objective = (c.get("objective") or "").replace("\n", " ")
+        print(f"  {code}  RF={rf_codes or []}  ({len(steps)} paso(s))")
         if title:
-            print(f"             título: {title}")
+            print(f"        título: {title}")
+        if objective:
+            print(f"        objetivo: {objective}")
+        for s in steps:
+            print(f"        {s['step_number']}) {s.get('action', '')}")
+            if s.get("expected_result"):
+                print(f"           espera: {s.get('expected_result')}")
+        non_pending = status_by_case.get(tc_id)
+        if non_pending:
+            print(f"        estado relación: {non_pending}")
     print()
     print(f"TOTAL casos: {len(cases)}")
 

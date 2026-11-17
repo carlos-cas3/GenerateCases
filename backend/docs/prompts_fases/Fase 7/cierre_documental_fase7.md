@@ -79,7 +79,10 @@
    queda sin RF se descarta (si no queda ninguno, la unidad es inválida y se reintenta). El
    contrato (`target_codes` en `TestCaseDraft`) no cambia. Para no perder observabilidad, las
    unidades exitosas con códigos filtrados generan el aviso `REQUIREMENT_CODES_FILTERED`
-   (`details.units[unit_id]` = `filtered_codes`, `filtered_count`, `dropped_cases`).
+   (`details.units[unit_id]` = `filtered_codes`: códigos foráneos distintos y ordenados;
+   `filtered_occurrences`: total de apariciones filtradas, contando el mismo código una vez por
+   caso; `dropped_cases`: casos descartados por quedarse sin RF). El campo se llamaba
+   `filtered_count`; se renombró por ambigüedad (ver `revisar_filtered_count.md`).
 9. **`llm_runs`.** Uno por unidad (también las fallidas, con sus intentos), con `unit_id`.
 10. **`P6_PROMPT_VERSION` default `v2`.** El plan proponía default `v1`, pero también pide subir la
     versión si cambia la redacción (T-F7-06). Como los prompts cambiaron, `config.py`, `.env` y

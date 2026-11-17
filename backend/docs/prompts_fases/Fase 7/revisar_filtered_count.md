@@ -1,10 +1,8 @@
 # Por revisar — Semántica de `filtered_count` en el aviso `REQUIREMENT_CODES_FILTERED`
 
-> **Estado:** por revisar. Aún no se decide qué hacer con `filtered_count`. Este documento
-> reúne toda la información relevante —incluida una **evidencia de ejecución real** (§Evidencia
-> de ejecución real) que muestra el problema tal como se manifestó en una generación— para
-> decidirlo más adelante. No requiere acción inmediata: el pipeline funciona correctamente y la
-> suite pasa (533 tests).
+> **Estado:** **resuelto** — opción 1: `filtered_count` se renombró a `filtered_occurrences`
+> (ver §Decisión tomada). El resto del documento conserva el análisis original, que usa el
+> nombre antiguo del campo.
 > **Quien lo resuelva** debe elegir una de las opciones de §Opciones de resolución, aplicarla, y
 > **explicar por qué eligió esa forma y en qué ayuda** hacerlo así (ver §Nota para quien resuelva).
 > **Área:** `ai_service/pipeline/stages/p6_generation.py` (construcción del aviso),
@@ -192,7 +190,7 @@ para validar que la solución elegida sigue reportando bien la frecuencia.
 
 ---
 
-## Opciones de resolución (sin decidir)
+## Opciones de resolución
 
 1. **Renombrar** `filtered_count` → `filtered_occurrences` (o `filtered_total`), dejando claro
    que cuenta ocurrencias. Mínimo impacto; solo cambia el nombre del campo del detalle.
@@ -203,6 +201,54 @@ para validar que la solución elegida sigue reportando bien la frecuencia.
    `filtered_codes`. Pierde la información de frecuencia.
 4. **Dejarlo como está** y documentar la semántica aquí y/o en `cierre_documental_fase7.md` §3
    decisión 9. Es la opción de menor riesgo si la frecuencia no se usa todavía.
+
+---
+
+## Decisión tomada
+
+**Opción elegida: 1 — renombrar `filtered_count` → `filtered_occurrences`.** El valor no cambia
+(`len(r.filtered_codes)`, ocurrencias con duplicados); solo cambia el nombre de la clave.
+
+Detalle resultante, para la generación real `caa5f52c-…`:
+
+```json
+"U-001": { "filtered_codes": ["RF-003"], "filtered_occurrences": 2, "dropped_cases": 0 }
+```
+
+**Por qué esta opción frente a las demás:**
+
+- **Frente a la 3 (contar distintos):** se descarta porque **pierde información**. La frecuencia
+  (cuántas veces el LLM se equivocó) es la señal de severidad que interesa en calibración, y el
+  número de códigos distintos ya se obtiene sin coste como `len(filtered_codes)`; duplicarlo
+  como campo no aporta nada.
+- **Frente a la 2 (añadir `filtered_distinct_count`):** el tercer campo sería redundante con
+  `len(filtered_codes)` y, mientras `filtered_count` siguiera existiendo, la ambigüedad del
+  nombre se mantendría. Agranda el detalle sin resolver la causa.
+- **Frente a la 4 (dejarlo y documentar):** la confusión aparece **al leer el aviso** (en BD, en
+  `inspect_generation.py`, en la plantilla de calibración), no al leer la documentación. Un
+  nombre autoexplicativo arregla el problema donde se manifiesta; una nota en otro archivo no.
+
+**Qué se gana:**
+
+- **Claridad:** `filtered_occurrences` dice qué mide; ya no se espera que coincida con el largo de
+  `filtered_codes`, así que `["RF-003"]` + `2` se lee sin ambigüedad (1 código, 2 apariciones).
+- **Sin pérdida de datos:** se conservan ambas preguntas — *qué* códigos (`filtered_codes`) y
+  *cuántas veces* (`filtered_occurrences`).
+- **Impacto mínimo y reversible:** un cambio de clave en un `dict` de detalle. Ningún código del
+  pipeline ni del frontend lee este campo (solo el test), y el log de `p6_generation.py` no cambia.
+
+**Compatibilidad:** los avisos ya persistidos en `generation_stages` (p. ej. la generación
+`caa5f52c-…`) conservan la clave antigua `filtered_count`; las nuevas generaciones usan
+`filtered_occurrences`. Al comparar corridas de calibración anteriores a este cambio, leer
+`filtered_count` como sinónimo de `filtered_occurrences` (misma semántica).
+
+**Cambios aplicados:**
+
+- `ai_service/pipeline/stages/p6_generation.py` — clave del detalle del aviso.
+- `tests/test_p6_generation.py` — aserción del detalle.
+- `cierre_documental_fase7.md` §3 decisión 9 — describe los tres campos y el renombre.
+- `docs/calibracion_resultados/plantilla.md` — sin cambios: solo cita el código del aviso, no
+  sus campos.
 
 ---
 
