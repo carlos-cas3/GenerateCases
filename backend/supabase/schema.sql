@@ -245,6 +245,10 @@ alter table public.user_stories
     add column if not exists clarification_items      jsonb not null default '[]'::jsonb,
     add column if not exists position                 integer check (position > 0);
 
+-- Fase 7: conteos de resultados del pipeline (D-F7-8). Se puebla al completar P6.
+alter table public.generations
+    add column if not exists summary jsonb;
+
 alter table public.user_stories drop constraint if exists user_stories_validation_status_check;
 alter table public.user_stories add constraint user_stories_validation_status_check
     check (validation_status in ('valid', 'valid_with_warnings', 'invalid'));
