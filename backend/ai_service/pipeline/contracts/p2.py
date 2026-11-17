@@ -40,6 +40,8 @@ class _RequirementContent(ContractModel):
     """Campos que comparten el borrador del LLM y el RF registrado (1.3.4 y 1.4.3)."""
 
     description: NonEmptyStr
+    # D-NFR-1: el LLM marca los no funcionales; P2 los descarta antes de numerar (nunca llegan a P2Output).
+    is_functional: bool = True
     source_text: str | None = None
     user_story_codes: tuple[UserStoryCode, ...] = Field(min_length=1)
     actor: str | None = None
