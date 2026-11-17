@@ -42,6 +42,27 @@ propio `description`, `source_text` y `evidence`; pueden citar el mismo fragment
 Un RF que junta dos comportamientos con "y" casi siempre es compuesto: divídelo. Un RF atómico
 no se puede partir en dos sin perder información.
 
+### Requisitos funcionales vs no funcionales
+
+Solo extrae requisitos **funcionales**: comportamientos o salidas del sistema
+que se pueden verificar con un caso de prueba funcional.
+
+**No extraigas** como RF (márcalos con `is_functional: false` si aparecen):
+- Restricciones técnicas (tamaño máximo de archivo, límites de memoria, etc.)
+- Requisitos de rendimiento (tiempo de respuesta, throughput, latencia)
+- Requisitos de disponibilidad o fiabilidad (uptime, SLA)
+- Restricciones de infraestructura o plataforma
+- Requisitos de seguridad genéricos sin comportamiento funcional asociado
+  (ej. "solo admin puede acceder" sin describir qué ocurre si no es admin)
+
+Un requisito que describe una condición de acceso **con** comportamiento asociado sí es
+funcional (ej. "el sistema muestra un error 403 si el usuario no es admin").
+
+Si el texto describe un límite técnico, añádelo en `unspecified_information`
+del RF funcional más cercano en vez de crear un RF separado.
+
+Todo RF debe llevar el campo `is_functional` (`true` para los funcionales).
+
 ### RF simple
 Si la HU solo enuncia el requisito sin más detalle, produce un RF con los campos mínimos:
 
@@ -111,6 +132,7 @@ déjalos como `[]` / `null` según el tipo; la salida se valida contra el contra
   "requirements": [
     {
       "description": "El sistema debe exportar el reporte de ventas en formato PDF.",
+      "is_functional": true,
       "source_text": "El reporte se genera en formato PDF.",
       "user_story_codes": ["HU-001"],
       "actor": "administrador",
@@ -124,7 +146,16 @@ déjalos como `[]` / `null` según el tipo; la salida se valida contra el contra
       "evidence": [
         { "user_story_code": "HU-001", "text": "El reporte se genera en formato PDF.", "attribute": "description" }
       ]
+    },
+    {
+      "description": "El archivo generado no debe superar los 10 MB.",
+      "is_functional": false,
+      "source_text": "El archivo no supera 10 MB.",
+      "user_story_codes": ["HU-001"]
     }
   ]
 }
 ```
+
+El segundo RF del ejemplo es una restricción técnica: va marcado con `is_functional: false` y el
+pipeline lo descarta (no recibe código `RF-xxx`).

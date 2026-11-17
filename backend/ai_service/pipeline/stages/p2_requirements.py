@@ -7,7 +7,8 @@
    `""` de las listas (D-OLLAMA-4, `docs/llm_ollama_context.md`); reintenta el lote
    hasta `P2Config.max_retries` veces si la salida es inválida o el proveedor falla transitoriamente.
 4. Consolida los lotes en un `P2Output` (códigos `RF-xxx` consecutivos) y lo persiste con
-   `persist_p2_requirements`.
+   `persist_p2_requirements`. Antes de numerar descarta los RF marcados `is_functional=False`
+   (D-NFR-1): se registran en el log y en el aviso `NON_FUNCTIONAL_DISCARDED`.
 5. 0 RF → aviso `NO_REQUIREMENTS_EXTRACTED` y `skip_remaining=True` (D-29).
 """
 
@@ -96,7 +97,12 @@ class RequirementsStage(StageBase):
         for number, batch in enumerate(batches, start=1):
             results.append(await self._run_batch(context, prompt, batch, number))
 
-        output = self._consolidate(results)
+        output, discarded = self._consolidate(results)
+        for draft in discarded:
+            logger.info(
+                "P2 RF no funcional descartado generation_id=%s description=%s",
+                context.generation_id, draft.description,
+            )
         try:
             await self._results.persist_p2_requirements(context.generation_id, output.to_rpc_payload())
         except PersistenceError as exc:
@@ -109,7 +115,7 @@ class RequirementsStage(StageBase):
             context.generation_id, len(batches), len(output.requirements), dict(categories),
         )
         return StageResult(
-            warnings=self._warnings(output, results),
+            warnings=self._warnings(output, results, discarded),
             llm_runs=tuple(result.run for result in results),
             runtime_info={
                 "prompt_version": prompt.prompt_version,
@@ -230,26 +236,40 @@ class RequirementsStage(StageBase):
 
     # ----------------------------------------------------------- consolidación
     @staticmethod
-    def _consolidate(results: Sequence[_BatchResult]) -> P2Output:
+    def _consolidate(results: Sequence[_BatchResult]) -> tuple[P2Output, tuple[RequirementDraft, ...]]:
+        """Une los lotes y numera los RF. Los `is_functional=False` se descartan antes de numerar (D-NFR-1)."""
         classifications: list[StoryClassification] = []
         drafts: list[RequirementDraft] = []
         for result in results:
             classifications.extend(result.response.classifications)
             drafts.extend(result.response.requirements)
+        functional_drafts = [draft for draft in drafts if draft.is_functional]
+        discarded = tuple(draft for draft in drafts if not draft.is_functional)
         requirements = tuple(
             FunctionalRequirement(id=uuid4(), code=f"RF-{number:03d}", **draft.model_dump())
-            for number, draft in enumerate(drafts, start=1)
+            for number, draft in enumerate(functional_drafts, start=1)
         )
         covered = {code for requirement in requirements for code in requirement.user_story_codes}
-        return P2Output(
+        output = P2Output(
             classifications=tuple(classifications),
             requirements=requirements,
             stories_without_requirements=tuple(c.user_story_code for c in classifications if c.user_story_code not in covered),
         )
+        return output, discarded
 
     @staticmethod
-    def _warnings(output: P2Output, results: Sequence[_BatchResult]) -> tuple[StageWarning, ...]:
+    def _warnings(
+        output: P2Output, results: Sequence[_BatchResult], discarded: Sequence[RequirementDraft] = ()
+    ) -> tuple[StageWarning, ...]:
         warnings: list[StageWarning] = []
+        if discarded:
+            warnings.append(
+                StageWarning(
+                    code="NON_FUNCTIONAL_DISCARDED",
+                    message=f"{len(discarded)} requisito(s) no funcional(es) descartados.",
+                    details={"descriptions": [draft.description for draft in discarded]},
+                )
+            )
         if not output.requirements:
             warnings.append(
                 StageWarning(code="NO_REQUIREMENTS_EXTRACTED", message="Ninguna HU produjo requisitos funcionales.")

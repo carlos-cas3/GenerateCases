@@ -1,7 +1,7 @@
 # Issue resolver — Requisitos no funcionales en la salida de P2
 
 > **Fase:** 6 (detectado al verificar con datos reales en `HUtest/`)
-> **Estado:** ⚠️ pendiente de implementación
+> **Estado:** ✅ implementado (pendiente verificación con documento real, ver §8)
 > **Afecta a:** `ai_service/pipeline/prompts/texts/p2_requirements.md`,
 > `ai_service/pipeline/contracts/p2.py`, `ai_service/pipeline/stages/p2_requirements.py`
 > **No afecta a:** `schema.sql`, contratos de P3/P4/P5/P6, `openapi.yaml`
@@ -228,12 +228,12 @@ En `tests/test_p2_requirements.py` (o el archivo de tests de P2 correspondiente)
 
 ## 8. Criterios de cierre
 
-- [ ] `p2_requirements.md` incluye la sección "Requisitos funcionales vs no funcionales"
+- [x] `p2_requirements.md` incluye la sección "Requisitos funcionales vs no funcionales"
       y el campo `is_functional` en el ejemplo JSON.
-- [ ] `RequirementDraft` y `FunctionalRequirement` tienen `is_functional: bool = True`.
-- [ ] `_consolidate()` descarta los `is_functional=False` antes de numerar los `RF-xxx`.
-- [ ] Se emite `NON_FUNCTIONAL_DISCARDED` cuando hay al menos un descarte.
-- [ ] Los RF descartados se loguean con nivel `INFO`.
-- [ ] Suite completa pasa sin regresión.
+- [x] `RequirementDraft` y `FunctionalRequirement` tienen `is_functional: bool = True`.
+- [x] `_consolidate()` descarta los `is_functional=False` antes de numerar los `RF-xxx`.
+- [x] Se emite `NON_FUNCTIONAL_DISCARDED` cuando hay al menos un descarte.
+- [x] Los RF descartados se loguean con nivel `INFO`.
+- [x] Suite completa pasa sin regresión (499 tests: 493 previos + 6 nuevos).
 - [ ] Con el documento `HUtest/Cantidad_HU_2.txt`, los equivalentes de RF-005 y RF-011
       no aparecen en `generation_stages` ni en `functional_requirements`.
