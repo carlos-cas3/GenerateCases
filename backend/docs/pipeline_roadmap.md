@@ -7,7 +7,7 @@
 
 ## Resumen ejecutivo
 
-El pipeline tiene **7 etapas** (P1–P7). La infraestructura de orquestación está **completamente terminada**, la capa de contratos (P1–P6) está **completamente definida y con pruebas**, y `PipelineContext` ya transporta los outputs entre etapas. Desde la **Fase 4**, **P1** (segmentación heurística, sin LLM) y **P2** (clasificación + extracción de RF con LLM en lotes) tienen lógica real y persisten HU/RF en Supabase. Desde la **Fase 5**, **P3** (embeddings en lotes, solo en memoria) y **P4** (clustering HDBSCAN, persistido con `persist_p4_clusters`) también son reales; **P5–P7 siguen como stubs simulados**. `PIPELINE_STAGES=stub` mantiene las siete etapas simuladas. Siguiente: **Fase 6 — P5**.
+El pipeline tiene **7 etapas** (P1–P7). La infraestructura de orquestación está **completamente terminada**, la capa de contratos (P1–P6) está **completamente definida y con pruebas**, y `PipelineContext` ya transporta los outputs entre etapas. Desde la **Fase 4**, **P1** (segmentación heurística, sin LLM) y **P2** (clasificación + extracción de RF con LLM en lotes) tienen lógica real y persisten HU/RF en Supabase. Desde la **Fase 5**, **P3** (embeddings en lotes, solo en memoria) y **P4** (clustering HDBSCAN, persistido con `persist_p4_clusters`) también son reales. Desde la **Fase 6**, **P5** (construcción del `GenerationContext` en memoria, sin persistir) es real; **P6–P7 siguen como stubs simulados** (`PENDING_STUB_STAGE_CLASSES = (GenerationStage, EvaluationStage)`). `PIPELINE_STAGES=stub` mantiene las siete etapas simuladas. Siguiente: **Fase 7 — P6**.
 
 ---
 
@@ -53,7 +53,7 @@ POST /api/v1/generations
 | 2 | `p2` | Clasificación de HU y extracción de RF | ✅ sí | ✅ completo | ✅ real (LLM en lotes) | ✅ completo |
 | 3 | `p3` | Generación de embeddings | ✅ sí | ✅ completo | ✅ real (embeddings en lotes, sin persistir) | — (sin LLM) |
 | 4 | `p4` | Clustering semántico | ✅ sí | ✅ completo | ✅ real (HDBSCAN) | — (sin LLM) |
-| 5 | `p5` | Construcción de contexto estructurado | ✅ sí | ✅ completo | 🔴 stub | — (sin LLM) |
+| 5 | `p5` | Construcción de contexto estructurado | ✅ sí | ✅ completo | ✅ real (agrupación `by_cluster` / `by_user_story`, sin persistir) | — (sin LLM) |
 | 6 | `p6` | Generación de casos de prueba funcionales | ✅ sí | ✅ completo | 🔴 stub | ✅ completo (2 variantes) |
 | 7 | `p7` | Evaluación de resultados | ❌ no | ⏸ pendiente | 🔴 stub | ⏸ pendiente |
 
@@ -192,8 +192,17 @@ Detalle: `prompts_fases/Fase 5/fase5.md` y `prompts_fases/Fase 5/cierre_document
       **Corrección:** la RPC ya estaba en `schema.sql` y desplegada (2026-11-11); solo faltaba el caller.
 - [x] Prerrequisito de calidad: prompt de P2 corregido para RF atómicos (commit `85d580c`)
 
-### 🔲 Fase 6 — Implementación de P5 (contexto estructurado)
-- [ ] Implementar `ContextStage.run()` — agrupa RF por cluster o por HU según `UnitStrategy`, construye `GenerationContext`, respeta `max_tokens_per_unit`
+### ✅ Fase 6 — Implementación de P5 (contexto estructurado)
+Detalle: `prompts_fases/Fase 6/fase6.md` y `prompts_fases/Fase 6/cierre_documental_fase6.md`.
+
+- [x] Variables de entorno de `P5Config` (`P5_MAX_TOKENS_PER_UNIT`=8000, `P5_INSTRUCTIONS_VERSION`=v1,
+      `P5_INCLUDE_PREREQUISITES`=false)
+- [x] `build_p5_config` + `ContextStage` real en `build_real_stages`; `ContextStubStage` para `build_stub_stages`.
+      `PENDING_STUB_STAGE_CLASSES` solo lista P6 y P7
+- [x] `ContextStage.run()` — estrategia derivada de `p4_output` (R-ST-4), unidades `by_cluster` (con
+      `context_requirements`, D-31) o `by_user_story` (RF a la HU de menor posición), RF sin cluster
+      excluidos con aviso `UNASSIGNED_REQUIREMENTS` (D-36), `token_estimate` heurístico con
+      `exceeds_limit` + aviso `UNIT_EXCEEDS_TOKEN_LIMIT` (marca, no parte), sin persistir (D-12)
 
 ### 🔲 Fase 7 — Implementación de P6 (generación de casos de prueba)
 - [ ] Implementar `GenerationStage.run()` — itera unidades, llama al LLM con prompt resuelto, valida `P6LlmResponse`, asigna códigos CP-xxx, llama a `persist_p6_unit`
@@ -224,7 +233,7 @@ Otros cierres pendientes:
 | D-38 | P6 tiene dos variantes de prompt según `UnitStrategy` |
 | D-39 | Sin clustering → `UnitStrategy.BY_USER_STORY`; con clustering → `BY_CLUSTER` |
 | R6 | El contrato permite un RF en varios clusters, pero HDBSCAN da membresía única; D-31 (P5 elige el cluster objetivo) queda diferido |
-| D-36 | RF sin cluster se guardan y se muestran, pero no generan casos (regla para la Fase 6) |
+| D-36 | RF sin cluster se guardan y se muestran, pero no generan casos: P5 no les crea unidad y emite `UNASSIGNED_REQUIREMENTS` (Fase 6) |
 
 ---
 
@@ -243,3 +252,8 @@ Otros cierres pendientes:
    locales) HDBSCAN suele marcar todo como ruido → D-32 (`INSUFFICIENT_REQUIREMENTS`).
 7. **Sin prueba de `persist_p4_clusters` contra Postgres real** — validada con el fake en memoria y
    tests del adaptador; conviene un smoke test contra Supabase.
+8. **Calibración de `P5_MAX_TOKENS_PER_UNIT` pendiente** — el estimado de P5 (caracteres / 4) es
+   heurístico y puede desviarse del tokenizador del modelo de P6. `exceeds_limit` solo informa:
+   validar con documentos reales y ajustar por env var (ver `cierre_documental_fase6.md`).
+9. **Nombre de unidad placeholder** — con `by_cluster` el `label` de la unidad es `"Cluster {label}"`
+   (D-A de la Fase 5); se puede sustituir por un nombre semántico sin tocar el contrato.

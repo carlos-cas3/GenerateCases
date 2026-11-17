@@ -9,26 +9,26 @@ from ai_service.clients.llm import LlmClient
 from ai_service.clients.storage import DocumentStorage
 from ai_service.config import Settings
 from ai_service.core.errors import ConfigurationError
-from ai_service.pipeline.contracts.common import LlmSettings
+from ai_service.pipeline.contracts.common import LlmSettings, UnitStrategy
 from ai_service.pipeline.contracts.p1 import P1Config
 from ai_service.pipeline.contracts.p2 import P2Config
 from ai_service.pipeline.contracts.p3 import P3Config
 from ai_service.pipeline.contracts.p4 import P4Config
+from ai_service.pipeline.contracts.p5 import P5Config
 from ai_service.pipeline.prompts.p2 import resolve_p2_prompt
 from ai_service.pipeline.stages.base import StageBase, StageError, StageResult, StubStage
 from ai_service.pipeline.stages.p1_normalize import NormalizeStage, NormalizeStubStage
 from ai_service.pipeline.stages.p2_requirements import RequirementsStage, RequirementsStubStage
 from ai_service.pipeline.stages.p3_embeddings import EmbeddingsStage, EmbeddingsStubStage
 from ai_service.pipeline.stages.p4_clustering import ClusteringStage, ClusteringStubStage
-from ai_service.pipeline.stages.p5_context import ContextStage
+from ai_service.pipeline.stages.p5_context import ContextStage, ContextStubStage
 from ai_service.pipeline.stages.p6_generation import GenerationStage
 from ai_service.pipeline.stages.p7_evaluation import EvaluationStage
 from ai_service.repositories.documents import DocumentsRepository
 from ai_service.repositories.pipeline_results import PipelineResultsRepository
 
-# Etapas que siguen simuladas tras la Fase 5 (P5–P7).
+# Etapas que siguen simuladas tras la Fase 6 (P6–P7).
 PENDING_STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
-    ContextStage,
     GenerationStage,
     EvaluationStage,
 )
@@ -38,6 +38,7 @@ STUB_STAGE_CLASSES: tuple[type[StubStage], ...] = (
     RequirementsStubStage,
     EmbeddingsStubStage,
     ClusteringStubStage,
+    ContextStubStage,
     *PENDING_STUB_STAGE_CLASSES,
 )
 
@@ -102,6 +103,21 @@ def build_p4_config(settings: Settings) -> P4Config:
     )
 
 
+def build_p5_config(settings: Settings) -> P5Config:
+    """`P5Config` desde `Settings`.
+
+    El contrato exige `strategy`, pero no sale de la configuración: `ContextStage` la deriva de
+    `p4_output` en cada ejecución (D-F6-2) y la sustituye con `model_copy`. Aquí va un valor
+    provisional (`by_user_story`).
+    """
+    return P5Config(
+        max_tokens_per_unit=settings.p5_max_tokens_per_unit,
+        strategy=UnitStrategy.BY_USER_STORY,
+        instructions_version=settings.p5_instructions_version,
+        include_prerequisites=settings.p5_include_prerequisites,
+    )
+
+
 def build_real_stages(
     settings: Settings,
     *,
@@ -113,9 +129,11 @@ def build_real_stages(
     embeddings_client: EmbeddingsClient,
     clustering_client: ClusteringClient,
 ) -> list[StageBase]:
-    """P1 (heurística), P2 (LLM), P3 (embeddings) y P4 (clustering) reales; P5–P7 stubs (Fase 5).
+    """P1 (heurística), P2 (LLM), P3 (embeddings), P4 (clustering) y P5 (contexto) reales;
+    P6–P7 stubs (Fase 6).
 
     P1 no recibe `LlmClient` (camino B). P3 recibe `provider` aparte de `P3Config` (H-2).
+    P5 solo recibe su configuración: no usa clientes externos (R-DI-2).
     El fallo simulado solo aplica a las etapas stub.
     """
     p1 = NormalizeStage(
@@ -131,10 +149,11 @@ def build_real_stages(
         max_retries=settings.p3_max_retries,
     )
     p4 = ClusteringStage(clustering_client=clustering_client, config=build_p4_config(settings), results=results)
+    p5 = ContextStage(config=build_p5_config(settings))
     stubs = _stubs(
         PENDING_STUB_STAGE_CLASSES, settings.pipeline_stub_delay_seconds, settings.pipeline_stub_fail_at_stage
     )
-    return [p1, p2, p3, p4, *stubs]
+    return [p1, p2, p3, p4, p5, *stubs]
 
 
 __all__ = [
@@ -146,6 +165,7 @@ __all__ = [
     "RequirementsStage",
     "EmbeddingsStage",
     "ClusteringStage",
+    "ContextStage",
     "build_stub_stages",
     "build_real_stages",
     "build_llm_parameters",
@@ -153,6 +173,7 @@ __all__ = [
     "build_p2_config",
     "build_p3_config",
     "build_p4_config",
+    "build_p5_config",
     "STUB_STAGE_CLASSES",
     "PENDING_STUB_STAGE_CLASSES",
 ]

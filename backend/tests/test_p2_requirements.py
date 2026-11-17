@@ -276,3 +276,98 @@ async def test_persist_p2_is_idempotent(context, results, store) -> None:
 
     assert {code: row["id"] for code, row in store.requirements[context.generation_id].items()} == before
     assert len(store.story_requirements[context.generation_id]) == 2
+
+
+# --------------------------------------------- D-NFR-1: RF no funcionales descartados
+RF_NFR_SIZE = {
+    "description": "El sistema debe generar un archivo de reporte que no supere los 10 MB.",
+    "is_functional": False,
+    "source_text": "El archivo no supera 10 MB.",
+    "user_story_codes": ["HU-001"],
+}
+RF_NFR_TIME = {
+    "description": "El reporte debe generarse en un máximo de 5 segundos.",
+    "is_functional": False,
+    "source_text": "Se genera en máximo 5 segundos.",
+    "user_story_codes": ["HU-001"],
+}
+
+
+async def test_non_functional_requirement_is_discarded_before_numbering(context, results, store) -> None:
+    llm = FakeLlmClient([_json([HU1_CLASSIFICATION], [RF_NFR_SIZE, {**RF_LOGIN, "is_functional": True}]), HU2_OK])
+
+    result = await _stage(llm, results).run(context)
+
+    requirements = context.p2_output.requirements
+    assert [(r.code, r.description) for r in requirements] == [("RF-001", RF_LOGIN["description"])]
+    assert sorted(store.requirements[context.generation_id]) == ["RF-001"]
+    assert result.runtime_info["requirements_count"] == 1
+    assert result.skip_remaining is False
+
+
+async def test_non_functional_discarded_warning_and_info_log(context, results, caplog) -> None:
+    llm = FakeLlmClient([_json([HU1_CLASSIFICATION], [RF_NFR_SIZE, RF_LOGIN, RF_NFR_TIME]), HU2_OK])
+
+    with caplog.at_level(logging.INFO, logger="ai_service.pipeline.stages.p2_requirements"):
+        result = await _stage(llm, results).run(context)
+
+    warning = next(w for w in result.warnings if w.code == "NON_FUNCTIONAL_DISCARDED")
+    assert warning.details == {"descriptions": [RF_NFR_SIZE["description"], RF_NFR_TIME["description"]]}
+    assert "2 requisito(s)" in warning.message
+    discarded_logs = [r for r in caplog.records if "RF no funcional descartado" in r.getMessage()]
+    assert len(discarded_logs) == 2 and all(r.levelno == logging.INFO for r in discarded_logs)
+
+
+async def test_no_warning_without_discards(context, results) -> None:
+    llm = FakeLlmClient([_json([HU1_CLASSIFICATION], [{**RF_LOGIN, "is_functional": True}, RF_LOCK]), HU2_OK])
+
+    result = await _stage(llm, results).run(context)
+
+    assert all(w.code != "NON_FUNCTIONAL_DISCARDED" for w in result.warnings)
+    assert [r.code for r in context.p2_output.requirements] == ["RF-001", "RF-002"]
+
+
+async def test_only_non_functional_requirements_skips_remaining(context, results, store) -> None:
+    """D-29 sigue aplicando tras el filtro: 0 RF funcionales → `skip_remaining=True`."""
+    llm = FakeLlmClient([_json([HU1_CLASSIFICATION], [RF_NFR_SIZE, RF_NFR_TIME]), HU2_OK])
+
+    result = await _stage(llm, results).run(context)
+
+    assert result.skip_remaining is True
+    assert context.p2_output.requirements == ()
+    assert context.p2_output.stories_without_requirements == ("HU-001", "HU-002")
+    assert [w.code for w in result.warnings] == [
+        "NON_FUNCTIONAL_DISCARDED", "NO_REQUIREMENTS_EXTRACTED", "CANDIDATE_WITHOUT_REQUIREMENTS",
+    ]
+    assert store.requirements[context.generation_id] == {}
+
+
+async def test_report_scenario_drops_size_and_time_constraints(context, results, store) -> None:
+    """Escenario de `HUtest/Cantidad_HU_2.txt`: los equivalentes de RF-005 (10 MB) y RF-011 (5 s)
+    no llegan a `P2Output` ni a la persistencia, y la numeración queda consecutiva."""
+    rf_export = {
+        "description": "El sistema debe exportar el reporte en formato PDF.",
+        "is_functional": True,
+        "source_text": "exportar el reporte en PDF",
+        "user_story_codes": ["HU-001"],
+        "unspecified_information": ["el archivo no supera 10 MB"],
+    }
+    llm = FakeLlmClient([
+        _json([HU1_CLASSIFICATION], [RF_LOGIN, RF_NFR_SIZE, rf_export, RF_NFR_TIME, RF_LOCK]),
+        HU2_OK,
+    ])
+
+    await _stage(llm, results).run(context)
+
+    descriptions = [r.description for r in context.p2_output.requirements]
+    assert [r.code for r in context.p2_output.requirements] == ["RF-001", "RF-002", "RF-003"]
+    assert RF_NFR_SIZE["description"] not in descriptions and RF_NFR_TIME["description"] not in descriptions
+    persisted = store.requirements[context.generation_id]
+    assert sorted(persisted) == ["RF-001", "RF-002", "RF-003"]
+    assert all("10 MB" not in str(row) and "5 segundos" not in str(row) for row in persisted.values())
+
+
+def test_prompt_documents_is_functional() -> None:
+    text = resolve_p2_prompt("v1").text
+    assert "### Requisitos funcionales vs no funcionales" in text
+    assert '"is_functional": true' in text and '"is_functional": false' in text
