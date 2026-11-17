@@ -1,6 +1,8 @@
 # Issue — Saneo de `requirement_codes` en la respuesta del LLM (P6)
 
-> **Estado:** abierta. Detectada en la primera iteración de calibración con el pipeline real
+> **Estado:** resuelta. `filter_requirement_codes` en `llm_output.py`, llamada en
+> `GenerationStage._parse` y aviso `REQUIREMENT_CODES_FILTERED` (ver
+> `cierre_documental_fase7.md` §3 decisión 9). Detectada en la primera iteración de calibración con el pipeline real
 > (generación `6122e12a-0a5b-4cfc-9da7-6229faa3c2c3`).
 > **Área:** `ai_service/pipeline/stages/p6_generation.py`,
 > `ai_service/pipeline/stages/llm_output.py`.

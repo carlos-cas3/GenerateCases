@@ -212,7 +212,8 @@ Detalle: `prompts_fases/Fase 7/fase7.md` y `prompts_fases/Fase 7/cierre_document
       umbral y topes de casos (D-15 revisado, D-F7-1)
 - [x] Variables `P6_PROMPT_VERSION` (v2), `P6_MAX_RETRIES` (1), `P6_FAILURE_THRESHOLD` (0.0),
       `P6_MAX_CASES_MULTIPLIER` (3), `P6_MAX_CASES_ABSOLUTE` (50); `build_p6_config`
-- [x] `GenerationStage.run()` — una llamada por unidad, truncado al tope (`CASES_TRUNCATED`),
+- [x] `GenerationStage.run()` — una llamada por unidad, saneo de RF no objetivo
+      (`REQUIREMENT_CODES_FILTERED`), truncado al tope (`CASES_TRUNCATED`),
       reintentos (`BATCH_RETRIED`), unidades fallidas sin detener el resto, umbral
       (`GENERATION_THRESHOLD_EXCEEDED`), `CP-xxx` globales al persistir, `persist_p6_unit` al final.
       `GenerationStubStage` para `build_stub_stages`; `PENDING_STUB_STAGE_CLASSES` solo lista P7

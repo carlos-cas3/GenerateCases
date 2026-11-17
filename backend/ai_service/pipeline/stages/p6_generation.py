@@ -7,8 +7,10 @@
 3. Una llamada al LLM por unidad (D-F7-3). El `.md` del prompt va tal cual como `system`; el
    mensaje de usuario se arma aquí con el tope de casos, los RF objetivo, los RF de contexto (si
    hay), las HU de origen y el JSON Schema de salida (§Construcción del mensaje).
-4. Si el LLM devuelve más casos del tope `min(multiplier × RF, absolute)` se truncan antes de
-   validar (aviso `CASES_TRUNCATED`, D-F7-4). La respuesta se valida con `P6LlmResponse` y
+4. Antes de validar se filtran de `requirement_codes` los RF que no son objetivo de la unidad
+   (un caso que se queda sin RF se descarta; aviso `REQUIREMENT_CODES_FILTERED`). Si el LLM
+   devuelve más casos del tope `min(multiplier × RF, absolute)` se truncan antes de validar
+   (aviso `CASES_TRUNCATED`, D-F7-4). La respuesta se valida con `P6LlmResponse` y
    `target_codes`: un caso solo puede enlazar RF objetivo de su unidad.
 5. Reintenta la unidad hasta `P6Config.max_retries` veces si la salida es inválida o el proveedor
    falla transitoriamente (D-F7-5); `LLM_CONTEXT_LENGTH` no se reintenta. Una unidad que agota
@@ -52,6 +54,7 @@ from ai_service.pipeline.stages.llm_output import (
     RAW_LOG_LIMIT,
     add_optional,
     drop_blank_list_items,
+    filter_requirement_codes_with_stats,
     strip_code_fence,
 )
 from ai_service.repositories.pipeline_results import PipelineResultsRepository
@@ -75,6 +78,8 @@ class _UnitResult:
     failure: UnitFailure | None = None
     errors: list[str] = field(default_factory=list)
     truncated_from: int | None = None
+    filtered_codes: list[str] = field(default_factory=list)
+    dropped_cases: int = 0
 
     @property
     def retries(self) -> int:
@@ -208,11 +213,10 @@ class GenerationStage(StageBase):
             input_tokens = add_optional(input_tokens, response.input_tokens)
             output_tokens = add_optional(output_tokens, response.output_tokens)
             latency_ms = add_optional(latency_ms, response.latency_ms)
-            parsed, truncated_from = self._parse(context, response, unit, targets, max_cases, attempts)
+            parsed = self._parse(context, response, unit, targets, max_cases, attempts)
             if parsed is not None:
                 result.run = run()
-                result.response = parsed
-                result.truncated_from = truncated_from
+                result.response, result.truncated_from, result.filtered_codes, result.dropped_cases = parsed
                 return result
             result.errors.append("LLM_INVALID_OUTPUT")
 
@@ -229,9 +233,22 @@ class GenerationStage(StageBase):
         targets: set[str],
         max_cases: int,
         attempt: int,
-    ) -> tuple[P6LlmResponse | None, int | None]:
-        """Valida la respuesta. Los casos que exceden el tope se truncan antes de validar (D-F7-4)."""
-        raw = drop_blank_list_items(strip_code_fence(response.text))
+    ) -> tuple[P6LlmResponse, int | None, list[str], int] | None:
+        """Valida la respuesta; `None` si es inválida.
+
+        Antes de validar se filtran los RF que no son objetivo de la unidad (issue P6 de saneo de
+        `requirement_codes`) y luego se truncan los casos que exceden el tope (D-F7-4). Devuelve la
+        respuesta, el nº de casos recibidos si se truncó, los códigos filtrados y los casos
+        descartados por quedarse sin RF.
+        """
+        raw, filtered, dropped = filter_requirement_codes_with_stats(
+            drop_blank_list_items(strip_code_fence(response.text)), targets
+        )
+        if filtered:
+            logger.info(
+                "P6 RF no objetivo filtrados generation_id=%s unit_id=%s attempt=%s codigos=%s casos_descartados=%s",
+                context.generation_id, unit.unit_id, attempt, sorted(set(filtered)), dropped,
+            )
         truncated_from: int | None = None
         try:
             data = json.loads(raw)
@@ -242,7 +259,7 @@ class GenerationStage(StageBase):
             data["test_cases"] = data["test_cases"][:max_cases]
             raw = json.dumps(data, ensure_ascii=False)
         try:
-            return P6LlmResponse.model_validate_json(raw, context={"target_codes": targets}), truncated_from
+            validated = P6LlmResponse.model_validate_json(raw, context={"target_codes": targets})
         except ValidationError as exc:
             logger.debug(
                 "P6 unidad inválida generation_id=%s unit_id=%s attempt=%s raw=%s err=%s",
@@ -252,7 +269,8 @@ class GenerationStage(StageBase):
                 "P6 unidad inválida generation_id=%s unit_id=%s attempt=%s errores=%s",
                 context.generation_id, unit.unit_id, attempt, exc.error_count(),
             )
-            return None, None
+            return None
+        return validated, truncated_from, filtered, dropped
 
     def _build_request(
         self, prompt: ResolvedP6Prompt, generation_context: GenerationContext, unit: ContextUnit, max_cases: int
@@ -325,6 +343,23 @@ class GenerationStage(StageBase):
                     code="CASES_TRUNCATED",
                     message=f"{len(truncated)} unidad(es) devolvieron más casos del tope y se truncaron.",
                     details={"units": truncated},
+                )
+            )
+        filtered = {
+            r.unit.unit_id: {
+                "filtered_codes": sorted(set(r.filtered_codes)),
+                "filtered_count": len(r.filtered_codes),
+                "dropped_cases": r.dropped_cases,
+            }
+            for r in results
+            if r.filtered_codes and r.failure is None
+        }
+        if filtered:
+            warnings.append(
+                StageWarning(
+                    code="REQUIREMENT_CODES_FILTERED",
+                    message=f"{len(filtered)} unidad(es) enlazaron RF que no son objetivo; se filtraron.",
+                    details={"units": filtered},
                 )
             )
         retried = {r.unit.unit_id: r.errors for r in results if r.retries}

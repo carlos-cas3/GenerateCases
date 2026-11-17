@@ -73,6 +73,13 @@
 8. **`uncovered_requirement_codes`.** RF objetivo de todas las unidades (también las fallidas) sin
    ningún caso persistido. Se avisa con `UNCOVERED_REQUIREMENTS` (aviso nuevo, no previsto en el
    plan). Los RF sin cluster (D-36) no llegan a P6 y no se cuentan aquí.
+9. **Saneo de `requirement_codes` (issue `issue_p6_requirement_codes_sanitization.md`).** Tras
+   `drop_blank_list_items` y antes de truncar y validar, `filter_requirement_codes` (en
+   `llm_output.py`) quita de cada caso los RF que no son objetivo de la unidad; un caso que se
+   queda sin RF se descarta (si no queda ninguno, la unidad es inválida y se reintenta). El
+   contrato (`target_codes` en `TestCaseDraft`) no cambia. Para no perder observabilidad, las
+   unidades exitosas con códigos filtrados generan el aviso `REQUIREMENT_CODES_FILTERED`
+   (`details.units[unit_id]` = `filtered_codes`, `filtered_count`, `dropped_cases`).
 9. **`llm_runs`.** Uno por unidad (también las fallidas, con sus intentos), con `unit_id`.
 10. **`P6_PROMPT_VERSION` default `v2`.** El plan proponía default `v1`, pero también pide subir la
     versión si cambia la redacción (T-F7-06). Como los prompts cambiaron, `config.py`, `.env` y
@@ -107,9 +114,11 @@ como "entregado en el mensaje". Checklist:
 
 ## 5. Pruebas
 
-`tests/test_p6_generation.py` (19): camino feliz `by_cluster` (CP consecutivos, persistencia,
-`llm_runs` por unidad) y `by_user_story` (prompt sin clustering, sin sección de contexto); RF de
-contexto enlazado → unidad inválida; mensaje al LLM (tope, RF, HU, schema, sin label); tope desde
+`tests/test_p6_generation.py` (23): camino feliz `by_cluster` (CP consecutivos, persistencia,
+`llm_runs` por unidad) y `by_user_story` (prompt sin clustering, sin sección de contexto); caso
+con solo RF de contexto → descartado y unidad inválida; RF de contexto mezclado con objetivo →
+filtrado, caso persistido con solo RF objetivo y aviso `REQUIREMENT_CODES_FILTERED`;
+`filter_requirement_codes` (filtra foráneos, descarta caso sin RF, no toca texto no JSON); mensaje al LLM (tope, RF, HU, schema, sin label); tope desde
 la configuración; 3 unidades con la 2.ª fallida con umbral 0.0 (`StageError`, nada persistido, la
 3.ª igualmente procesada) y 0.5 (`completed`, CP-001…003 sin saltos, avisos); comparación estricta
 del umbral; `LLM_CONTEXT_LENGTH` sin reintento; `LLM_UNAVAILABLE`; fallo de persistencia sin saltos

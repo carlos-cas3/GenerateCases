@@ -14,6 +14,7 @@ from ai_service.pipeline.contracts.p5 import ContextRequirement, ContextUnit, Co
 from ai_service.pipeline.contracts.p6 import P6Config
 from ai_service.pipeline.prompts.p6 import resolve_p6_prompt
 from ai_service.pipeline.stages import GenerationStage, StageError
+from ai_service.pipeline.stages.llm_output import filter_requirement_codes, filter_requirement_codes_with_stats
 from ai_service.pipeline.stages.p6_generation import build_user_message
 from ai_service.repositories.in_memory import InMemoryPipelineResultsRepository, InMemoryStore
 from tests import contract_factories as f
@@ -124,10 +125,10 @@ async def test_by_cluster_happy_path_numbers_and_persists_every_unit() -> None:
 
 
 async def test_by_cluster_context_requirements_are_never_linked() -> None:
-    """Un caso que enlaza un RF de contexto es inválido: la unidad se reintenta y luego falla."""
+    """Un caso cuyos RF son todos de contexto se descarta; si la unidad queda sin casos, se reintenta y falla."""
     ctx = _context((_unit(1, (1,), context=(2,)), _unit(2, (2,), context=(1,))))
     store = _store_with_requirements(ctx)
-    llm = FakeLlmClient([_answer(("RF-002",)), _answer(("RF-001", "RF-002")), _answer(("RF-002",))])
+    llm = FakeLlmClient([_answer(("RF-002",)), _answer(("RF-002",)), _answer(("RF-002",))])
     stage, _ = _stage(llm, store, failure_threshold=0.5)
 
     result = await stage.run(ctx)
@@ -138,6 +139,28 @@ async def test_by_cluster_context_requirements_are_never_linked() -> None:
     assert linked == {"RF-002"}
     assert ctx.p6_output.uncovered_requirement_codes == ("RF-001",)
     assert "UNIT_GENERATION_FAILED" in _warning_codes(result)
+    assert "REQUIREMENT_CODES_FILTERED" not in _warning_codes(result)  # solo cuenta en unidades exitosas
+
+
+async def test_context_requirements_are_filtered_and_the_case_is_persisted() -> None:
+    """Issue de saneo P6: un RF de contexto en `requirement_codes` se filtra en vez de invalidar la unidad."""
+    ctx = _context((_unit(1, (1, 2), context=(3,)), _unit(2, (3,), context=(1,))))
+    store = _store_with_requirements(ctx)
+    llm = FakeLlmClient(
+        [_answer(("RF-001", "RF-003"), ("RF-002", "RF-003"), ("RF-003",)), _answer(("RF-003",))]
+    )
+    stage, _ = _stage(llm, store)
+
+    result = await stage.run(ctx)
+
+    assert len(llm.requests) == 2  # sin reintentos
+    assert [list(case.requirement_codes()) for case in ctx.p6_output.units[0].test_cases] == [["RF-001"], ["RF-002"]]
+    assert _codes(ctx) == ["CP-001", "CP-002", "CP-003"]
+    assert store.test_cases[ctx.generation_id]["CP-001"]["requirement_codes"] == ["RF-001"]
+    assert _warning_codes(result) == ["REQUIREMENT_CODES_FILTERED"]
+    assert result.warnings[0].details == {
+        "units": {"U-001": {"filtered_codes": ["RF-003"], "filtered_count": 3, "dropped_cases": 1}}
+    }
 
 
 async def test_by_user_story_happy_path_uses_prompt_without_clustering() -> None:
@@ -394,3 +417,28 @@ async def test_in_memory_persist_p6_unit_is_idempotent_and_checks_references() -
         await repo.persist_p6_unit(uuid4(), payload)
     with pytest.raises(MissingIdentifierError):
         await repo.persist_p6_unit(gid, {"test_cases": [{**payload["test_cases"][0], "id": None}]})
+
+
+# --------------------------------------------------------------- saneo de requirement_codes
+def test_filter_requirement_codes_drops_foreign_codes_and_keeps_valid_ones() -> None:
+    raw = _answer(("RF-001", "RF-003"), ("RF-002",))
+
+    data = json.loads(filter_requirement_codes(raw, {"RF-001", "RF-002"}))
+
+    assert [case["requirement_codes"] for case in data["test_cases"]] == [["RF-001"], ["RF-002"]]
+    assert data["test_cases"][0]["title"] == "Caso 1" and data["test_cases"][0]["steps"]
+
+
+def test_filter_requirement_codes_drops_the_case_when_every_code_is_foreign() -> None:
+    raw = _answer(("RF-003",), ("RF-001", "RF-003"))
+
+    filtered, codes, dropped = filter_requirement_codes_with_stats(raw, {"RF-001"})
+
+    assert [case["requirement_codes"] for case in json.loads(filtered)["test_cases"]] == [["RF-001"]]
+    assert (codes, dropped) == (["RF-003", "RF-003"], 1)
+
+
+def test_filter_requirement_codes_leaves_non_json_and_clean_answers_untouched() -> None:
+    assert filter_requirement_codes("no json", {"RF-001"}) == "no json"
+    clean = _answer(("RF-001",))
+    assert filter_requirement_codes(clean, {"RF-001"}) == clean

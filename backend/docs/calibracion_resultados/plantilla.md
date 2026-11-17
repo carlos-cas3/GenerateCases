@@ -40,7 +40,7 @@
 | `summary.test_cases_count` | | |
 | `summary.test_cases_failed_units` | | |
 | RF objetivo sin casos (`UNCOVERED_REQUIREMENTS`) | | |
-| Avisos de P6 (`CASES_TRUNCATED`, `BATCH_RETRIED`, …) | | |
+| Avisos de P6 (`CASES_TRUNCATED`, `REQUIREMENT_CODES_FILTERED`, `BATCH_RETRIED`, …) | | |
 | Tokens entrada / salida de P6 (Σ `llm_runs`) | | |
 | Latencia total de P6 | | |
 
