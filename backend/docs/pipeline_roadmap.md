@@ -231,6 +231,8 @@ P7 no se diseña ni implementa hasta esta fase. Lo que se sabe hasta ahora:
 Otros cierres pendientes:
 - [ ] SSE (`GET /api/v1/generations/{id}/events`) en sustitución del polling
 - [ ] Pruebas de integración end-to-end con Supabase real
+- [ ] `stop_after` (parada limpia tras la etapa N) para calibración — ver
+      `prompts_fases/Fase 8/calibracion_stop.md`
 
 ---
 
@@ -263,11 +265,15 @@ Otros cierres pendientes:
 6. **Calibración de HDBSCAN pendiente** — `P4_MIN_CLUSTER_SIZE=2` / `P4_MIN_SAMPLES=1` son valores
    iniciales. Validar con documentos reales y ajustar por env var. Con muy pocos RF (≤3 en pruebas
    locales) HDBSCAN suele marcar todo como ruido → D-32 (`INSUFFICIENT_REQUIREMENTS`).
+   Calibrarlo con `PIPELINE_STOP_AFTER_STAGE=p4` para iterar sin pagar el LLM de P6 (ver
+   `prompts_fases/Fase 8/calibracion_stop.md`).
 7. **Sin prueba de `persist_p4_clusters` contra Postgres real** — validada con el fake en memoria y
    tests del adaptador; conviene un smoke test contra Supabase.
 8. **Calibración de `P5_MAX_TOKENS_PER_UNIT` pendiente** — el estimado de P5 (caracteres / 4) es
    heurístico y puede desviarse del tokenizador del modelo de P6. `exceeds_limit` solo informa:
    validar con documentos reales y ajustar por env var (ver `cierre_documental_fase6.md`).
+   Calibrarlo con `PIPELINE_STOP_AFTER_STAGE=p5` para inspeccionar las unidades sin correr P6
+   (ver `prompts_fases/Fase 8/calibracion_stop.md`).
 9. **Nombre de unidad placeholder** — con `by_cluster` el `label` de la unidad es `"Cluster {label}"`
    (D-A de la Fase 5); se puede sustituir por un nombre semántico sin tocar el contrato. Desde la
    Fase 7 el `label` no se envía al LLM de P6.
