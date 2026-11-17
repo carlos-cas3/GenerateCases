@@ -117,7 +117,7 @@ class TestCase(ContractModel):
 
 
 class P6UnitOutput(ContractModel):
-    """Casos de prueba de una unidad. Se persiste de forma atómica con `persist_p6_unit` (D-15)."""
+    """Casos de prueba de una unidad. Se persiste de forma atómica con `persist_p6_unit` (D-F7-7)."""
 
     unit_id: UnitId
     test_cases: tuple[TestCase, ...] = ()
@@ -153,7 +153,7 @@ class P6UnitOutput(ContractModel):
 
 
 class UnitFailure(ContractModel):
-    """Unidad de P6 que falló tras agotar reintentos (D-15)."""
+    """Unidad de P6 que falló tras agotar reintentos o al persistirse (D-F7-1)."""
 
     unit_id: UnitId
     error_code: NonEmptyStr
@@ -161,16 +161,30 @@ class UnitFailure(ContractModel):
 
 
 class P6Config(ContractModel):
-    """Configuración de P6 (servidor, R8). `on_unit_failure`: D-15 solo admite detener la etapa.
+    """Configuración de P6 (servidor, R8).
 
     `prompt_version` identifica la familia/versión. P6 resuelve la variante
     (`contexto`/`contexto_sin_clustering`) con `context.strategy` (D-38).
+
+    - `on_unit_failure`: D-15 revisado (D-F7-1): P6 procesa todas las unidades y registra las
+      fallidas. Es el único modo soportado; el campo se mantiene por extensibilidad.
+    - `failure_threshold`: proporción máxima de unidades fallidas (D-F7-2). Si
+      `fallidas / total > failure_threshold`, la generación queda `failed`.
+    - `max_cases_multiplier` / `max_cases_absolute`: tope de casos por unidad (D-F7-4),
+      `min(multiplier × RF objetivo, absolute)`.
     """
 
     prompt_version: NonEmptyStr
     llm: LlmSettings
     max_retries: int = Field(ge=0)
-    on_unit_failure: Literal["fail"] = "fail"
+    on_unit_failure: Literal["continue"] = "continue"
+    failure_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_cases_multiplier: int = Field(default=3, gt=0)
+    max_cases_absolute: int = Field(default=50, gt=0)
+
+    def max_cases_for(self, requirements_count: int) -> int:
+        """Tope efectivo de casos para una unidad con `requirements_count` RF objetivo (D-F7-4)."""
+        return min(self.max_cases_multiplier * requirements_count, self.max_cases_absolute)
 
 
 class P6Input(ContractModel):
@@ -195,7 +209,7 @@ class P6Output(ContractModel):
 
     units: tuple[P6UnitOutput, ...] = ()
     uncovered_requirement_codes: tuple[RequirementCode, ...] = ()
-    failed_units: tuple[UnitFailure, ...] = Field(default=(), max_length=1)  # D-15: P6 se detiene en el primer fallo
+    failed_units: tuple[UnitFailure, ...] = ()  # D-F7-1: puede fallar más de una unidad
 
     @property
     def test_cases(self) -> tuple[TestCase, ...]:
@@ -210,6 +224,7 @@ class P6Output(ContractModel):
         numbers = [code_number(case.code) for case in cases]
         if numbers != list(range(1, len(numbers) + 1)):
             raise ValueError("los códigos de CP deben ser consecutivos desde CP-001")
+        ensure_unique((item.unit_id for item in self.failed_units), "unidades fallidas")
         failed = {item.unit_id for item in self.failed_units}
         if failed & {unit.unit_id for unit in self.units}:
             raise ValueError("una unidad fallida no puede tener casos persistidos")

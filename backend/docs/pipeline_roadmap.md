@@ -7,7 +7,7 @@
 
 ## Resumen ejecutivo
 
-El pipeline tiene **7 etapas** (P1–P7). La infraestructura de orquestación está **completamente terminada**, la capa de contratos (P1–P6) está **completamente definida y con pruebas**, y `PipelineContext` ya transporta los outputs entre etapas. Desde la **Fase 4**, **P1** (segmentación heurística, sin LLM) y **P2** (clasificación + extracción de RF con LLM en lotes) tienen lógica real y persisten HU/RF en Supabase. Desde la **Fase 5**, **P3** (embeddings en lotes, solo en memoria) y **P4** (clustering HDBSCAN, persistido con `persist_p4_clusters`) también son reales. Desde la **Fase 6**, **P5** (construcción del `GenerationContext` en memoria, sin persistir) es real; **P6–P7 siguen como stubs simulados** (`PENDING_STUB_STAGE_CLASSES = (GenerationStage, EvaluationStage)`). `PIPELINE_STAGES=stub` mantiene las siete etapas simuladas. Siguiente: **Fase 7 — P6**.
+El pipeline tiene **7 etapas** (P1–P7). La infraestructura de orquestación está **completamente terminada**, la capa de contratos (P1–P6) está **completamente definida y con pruebas**, y `PipelineContext` ya transporta los outputs entre etapas. Desde la **Fase 4**, **P1** (segmentación heurística, sin LLM) y **P2** (clasificación + extracción de RF con LLM en lotes) tienen lógica real y persisten HU/RF en Supabase. Desde la **Fase 5**, **P3** (embeddings en lotes, solo en memoria) y **P4** (clustering HDBSCAN, persistido con `persist_p4_clusters`) también son reales. Desde la **Fase 6**, **P5** (construcción del `GenerationContext` en memoria, sin persistir) es real. Desde la **Fase 7**, **P6** (una llamada al LLM por unidad, códigos `CP-xxx` globales, persistencia con `persist_p6_unit` al final y umbral de unidades fallidas) es real y la API puebla `summary`; **solo P7 sigue como stub simulado** (`PENDING_STUB_STAGE_CLASSES = (EvaluationStage,)`). `PIPELINE_STAGES=stub` mantiene las siete etapas simuladas. Siguiente: **Fase 8 — P7**.
 
 ---
 
@@ -54,7 +54,7 @@ POST /api/v1/generations
 | 3 | `p3` | Generación de embeddings | ✅ sí | ✅ completo | ✅ real (embeddings en lotes, sin persistir) | — (sin LLM) |
 | 4 | `p4` | Clustering semántico | ✅ sí | ✅ completo | ✅ real (HDBSCAN) | — (sin LLM) |
 | 5 | `p5` | Construcción de contexto estructurado | ✅ sí | ✅ completo | ✅ real (agrupación `by_cluster` / `by_user_story`, sin persistir) | — (sin LLM) |
-| 6 | `p6` | Generación de casos de prueba funcionales | ✅ sí | ✅ completo | 🔴 stub | ✅ completo (2 variantes) |
+| 6 | `p6` | Generación de casos de prueba funcionales | ✅ sí | ✅ completo | ✅ real (LLM por unidad, persiste con `persist_p6_unit`) | ✅ v2 (2 variantes equivalentes) |
 | 7 | `p7` | Evaluación de resultados | ❌ no | ⏸ pendiente | 🔴 stub | ⏸ pendiente |
 
 > P3 y P4 se omiten (`skipped`) automáticamente cuando `clustering_enabled = false`.  
@@ -120,8 +120,9 @@ El contrato admite RF en varios clusters (R6), pero HDBSCAN produce membresía �
 ### `contracts/p6.py` ✅
 `P6Input (GenerationContext) → P6LlmResponse (intermedio) → P6Output`  
 `TestCase`, `TestStep`, `RequirementTestCaseLink` (sale siempre `pending`).  
-Valida: códigos `CP-xxx` consecutivos desde `CP-001`, máximo 1 unidad fallida (D-15).  
-`P6UnitOutput.to_rpc_payload()` → `persist_p6_unit` (pendiente).
+Valida: códigos `CP-xxx` consecutivos desde `CP-001`; varias unidades fallidas sin repetir (D-15 revisado, D-F7-1).  
+`P6Config`: `on_unit_failure="continue"`, `failure_threshold`, `max_cases_multiplier`, `max_cases_absolute` (Fase 7).  
+`P6UnitOutput.to_rpc_payload()` → `persist_p6_unit` (caller en Supabase y fake desde la Fase 7).
 
 ### `contracts/p7.py` — no se desarrolla en Fase 3
 P7 no tiene contrato. Su diseño, dependencias de entrada y lógica se analizarán
@@ -136,8 +137,8 @@ corre siempre al final del pipeline.
 | Archivo | Estado | Descripción |
 |---|---|---|
 | `prompts/p6.py` | ✅ completo | `resolve_p6_prompt(prompt_version, strategy)` — selecciona variante por `UnitStrategy` |
-| `prompts/texts/contexto.md` | ✅ completo | Prompt P6 con clustering (`by_cluster`) |
-| `prompts/texts/contexto_sin_clustering.md` | ✅ completo | Prompt P6 sin clustering (`by_user_story`) |
+| `prompts/texts/contexto.md` | ✅ v2 (Fase 7) | Prompt P6 con clustering (`by_cluster`); equivalente al de sin clustering salvo los RF de contexto (D-F7-9) |
+| `prompts/texts/contexto_sin_clustering.md` | ✅ v2 (Fase 7) | Prompt P6 sin clustering (`by_user_story`); no menciona clusters |
 | `prompts/p1.py` + texto | — (sin LLM) | P1 usa heurística (camino B); el formato lo fija `prompts_fases/Fase 4/plantilla_hu.md` |
 | `prompts/p2.py` + `texts/p2_requirements.md` | ✅ completo | `resolve_p2_prompt(prompt_version)` — una variante |
 | `prompts/p7.py` + texto | ⏸ pendiente | Se desarrolla cuando se implemente P7 |
@@ -204,10 +205,21 @@ Detalle: `prompts_fases/Fase 6/fase6.md` y `prompts_fases/Fase 6/cierre_document
       excluidos con aviso `UNASSIGNED_REQUIREMENTS` (D-36), `token_estimate` heurístico con
       `exceeds_limit` + aviso `UNIT_EXCEEDS_TOKEN_LIMIT` (marca, no parte), sin persistir (D-12)
 
-### 🔲 Fase 7 — Implementación de P6 (generación de casos de prueba)
-- [ ] Implementar `GenerationStage.run()` — itera unidades, llama al LLM con prompt resuelto, valida `P6LlmResponse`, asigna códigos CP-xxx, llama a `persist_p6_unit`
-- [ ] RPC `persist_p6_unit` en el cliente Supabase
-- [ ] Poblar `summary` en la respuesta de la API (conteos HU/RF/CP)
+### ✅ Fase 7 — Implementación de P6 (generación de casos de prueba)
+Detalle: `prompts_fases/Fase 7/fase7.md` y `prompts_fases/Fase 7/cierre_documental_fase7.md`.
+
+- [x] Contrato: `P6Output.failed_units` sin `max_length=1`; `P6Config.on_unit_failure="continue"` +
+      umbral y topes de casos (D-15 revisado, D-F7-1)
+- [x] Variables `P6_PROMPT_VERSION` (v2), `P6_MAX_RETRIES` (1), `P6_FAILURE_THRESHOLD` (0.0),
+      `P6_MAX_CASES_MULTIPLIER` (3), `P6_MAX_CASES_ABSOLUTE` (50); `build_p6_config`
+- [x] `GenerationStage.run()` — una llamada por unidad, truncado al tope (`CASES_TRUNCATED`),
+      reintentos (`BATCH_RETRIED`), unidades fallidas sin detener el resto, umbral
+      (`GENERATION_THRESHOLD_EXCEEDED`), `CP-xxx` globales al persistir, `persist_p6_unit` al final.
+      `GenerationStubStage` para `build_stub_stages`; `PENDING_STUB_STAGE_CLASSES` solo lista P7
+- [x] Caller de `persist_p6_unit` (Supabase + fake en memoria)
+- [x] `summary` en la API (5 conteos, D-F7-8) escrito al recibir `pipeline_completed`
+- [x] Prompts de P6 revisados y equivalentes (D-F7-9)
+- [ ] Primera iteración de calibración con el pipeline real (`docs/calibracion_resultados/iteracion_1.md`, plantilla creada)
 
 ### 🔲 Fase 8 — Implementación de P7 (evaluación) + cierre
 P7 no se diseña ni implementa hasta esta fase. Lo que se sabe hasta ahora:
@@ -225,7 +237,7 @@ Otros cierres pendientes:
 
 | Regla | Descripción |
 |---|---|
-| D-15 | P6 se detiene en el primer fallo de unidad (`on_unit_failure = "fail"`) |
+| D-15 (revisado, D-F7-1) | P6 procesa todas las unidades; si `fallidas / total > P6_FAILURE_THRESHOLD` la generación queda `failed` |
 | D-29 | Si P2 devuelve 0 RF, activa `skip_remaining`: P3–P7 quedan `skipped` |
 | D-31 | RF de otras unidades aparecen como `context_requirements` en `ContextUnit` |
 | D-32 | RF sin cluster asignado no generan casos de prueba |
@@ -256,4 +268,11 @@ Otros cierres pendientes:
    heurístico y puede desviarse del tokenizador del modelo de P6. `exceeds_limit` solo informa:
    validar con documentos reales y ajustar por env var (ver `cierre_documental_fase6.md`).
 9. **Nombre de unidad placeholder** — con `by_cluster` el `label` de la unidad es `"Cluster {label}"`
-   (D-A de la Fase 5); se puede sustituir por un nombre semántico sin tocar el contrato.
+   (D-A de la Fase 5); se puede sustituir por un nombre semántico sin tocar el contrato. Desde la
+   Fase 7 el `label` no se envía al LLM de P6.
+10. **Sin prueba de `persist_p6_unit` ni de `summary` contra Postgres real** — validados con el fake en
+    memoria; conviene un smoke test contra Supabase (columna `generations.summary` incluida en las
+    migraciones aditivas de `schema.sql`; confirmar que está aplicada).
+11. **Generación `failed` en P6 con unidades ya persistidas** — si el umbral solo se supera por fallos
+    de **persistencia**, las unidades persistidas antes quedan en la BD de una generación `failed`.
+    Con fallos del LLM el umbral se evalúa antes de persistir y no queda nada a medias.

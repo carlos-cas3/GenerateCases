@@ -1,8 +1,8 @@
 """Puerto de persistencia de resultados del pipeline — solo el contrato, sin infraestructura.
 
 Cada método invoca una RPC transaccional e idempotente de `supabase/schema.sql`
-(`persist_p1_user_stories`, `persist_p2_requirements`, `persist_p4_clusters`). Los payloads los construyen los
-contratos (`P1Output`, `P2Output`, `P4Output` → `to_rpc_payload()`); el repositorio solo
+(`persist_p1_user_stories`, `persist_p2_requirements`, `persist_p4_clusters`, `persist_p6_unit`). Los payloads
+los construyen los contratos (`P1Output`, `P2Output`, `P4Output`, `P6UnitOutput` → `to_rpc_payload()`); el repositorio solo
 los envía y traduce los errores SQL a excepciones de dominio (`PersistenceError` y subtipos).
 """
 
@@ -30,5 +30,14 @@ class PipelineResultsRepository(Protocol):
 
         Lanza `MissingIdentifierError` si un cluster no trae `id` e `InvalidReferenceError` si se
         referencian RF inexistentes en la generación.
+        """
+        ...
+
+    async def persist_p6_unit(self, generation_id: UUID, payload: dict[str, Any]) -> None:
+        """Guarda los casos de una unidad de P6 (casos, pasos y vínculos RF–CP `pending`) en una
+        transacción. Idempotente por (`generation_id`, `code`).
+
+        Lanza `MissingIdentifierError` si un caso no trae `id` e `InvalidReferenceError` si se
+        enlazan RF inexistentes en la generación.
         """
         ...

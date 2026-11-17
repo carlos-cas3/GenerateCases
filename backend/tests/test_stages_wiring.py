@@ -1,4 +1,4 @@
-"""Cableado de P1–P5 reales (T-F4-04, T-F5-03, T-F6-02) y flujo HTTP extremo a extremo con fakes."""
+"""Cableado de P1–P6 reales (T-F4-04, T-F5-03, T-F6-02, T-F7-07) y flujo HTTP extremo a extremo con fakes."""
 
 import json
 from collections.abc import Iterator
@@ -19,6 +19,7 @@ from ai_service.pipeline.stages import (
     ClusteringStage,
     ContextStage,
     EmbeddingsStage,
+    GenerationStage,
     NormalizeStage,
     RequirementsStage,
     StubStage,
@@ -27,6 +28,7 @@ from ai_service.pipeline.stages import (
     build_p3_config,
     build_p4_config,
     build_p5_config,
+    build_p6_config,
     build_real_stages,
     build_stub_stages,
 )
@@ -69,6 +71,23 @@ RF_LOCK = {
     "source_text": "Bloquear tras 3 intentos.",
     "user_story_codes": ["HU-001"],
 }
+
+
+def _p6_answer(*requirement_codes: tuple[str, ...]) -> str:
+    """Respuesta del LLM de P6: un caso por tupla de RF enlazados."""
+    return json.dumps(
+        {
+            "test_cases": [
+                {
+                    "title": f"Caso {number}",
+                    "steps": [{"step_number": 1, "action": "Ejecutar la acción"}],
+                    "expected_result": "El sistema responde según el requisito.",
+                    "requirement_codes": list(codes),
+                }
+                for number, codes in enumerate(requirement_codes, start=1)
+            ]
+        }
+    )
 
 
 def _embeddings(count: int) -> EmbeddingsResponse:
@@ -139,6 +158,38 @@ def test_build_p5_config_from_settings() -> None:
     assert (custom.max_tokens_per_unit, custom.instructions_version, custom.include_prerequisites) == (1200, "v2", True)
 
 
+def test_build_p6_config_from_settings() -> None:
+    defaults = build_p6_config(make_settings(llm_model="m", llm_provider="ollama"))
+    assert (defaults.prompt_version, defaults.max_retries, defaults.failure_threshold) == ("v2", 1, 0.0)
+    assert (defaults.max_cases_multiplier, defaults.max_cases_absolute, defaults.on_unit_failure) == (3, 50, "continue")
+    assert (defaults.llm.provider, defaults.llm.model) == ("ollama", "m")
+    assert defaults.llm.parameters == {"temperature": 0.0, "num_ctx": 16384, "think": False}
+
+    custom = build_p6_config(
+        make_settings(
+            llm_model="m", p6_prompt_version="v9", p6_max_retries=0, p6_failure_threshold=0.5,
+            p6_max_cases_multiplier=2, p6_max_cases_absolute=10,
+        )
+    )
+    assert (custom.prompt_version, custom.max_retries, custom.failure_threshold) == ("v9", 0, 0.5)
+    assert (custom.max_cases_multiplier, custom.max_cases_absolute) == (2, 10)
+
+
+def test_build_p6_config_requires_llm_model() -> None:
+    with pytest.raises(ConfigurationError, match="LLM_MODEL"):
+        build_p6_config(make_settings(llm_model=None))
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"p6_failure_threshold": 1.1}, {"p6_failure_threshold": -0.1}, {"p6_max_retries": -1},
+     {"p6_max_cases_multiplier": 0}, {"p6_max_cases_absolute": 0}, {"p6_prompt_version": ""}],
+)
+def test_p6_settings_reject_invalid_values(overrides: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        make_settings(**overrides)
+
+
 def test_p5_settings_reject_invalid_values() -> None:
     with pytest.raises(ValueError):
         make_settings(p5_max_tokens_per_unit=0)
@@ -146,7 +197,7 @@ def test_p5_settings_reject_invalid_values() -> None:
         make_settings(p5_instructions_version="")
 
 
-def test_build_real_stages_replaces_p1_to_p5(store: InMemoryStore) -> None:
+def test_build_real_stages_replaces_p1_to_p6(store: InMemoryStore) -> None:
     stages = build_real_stages(
         make_settings(llm_model="m"),
         documents=InMemoryDocumentsRepository(store),
@@ -159,10 +210,10 @@ def test_build_real_stages_replaces_p1_to_p5(store: InMemoryStore) -> None:
     )
 
     assert [s.key.value for s in stages] == ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
-    real = (NormalizeStage, RequirementsStage, EmbeddingsStage, ClusteringStage, ContextStage)
-    for stage, cls in zip(stages[:5], real, strict=True):
+    real = (NormalizeStage, RequirementsStage, EmbeddingsStage, ClusteringStage, ContextStage, GenerationStage)
+    for stage, cls in zip(stages[:6], real, strict=True):
         assert isinstance(stage, cls) and not isinstance(stage, StubStage)
-    assert all(isinstance(s, StubStage) for s in stages[5:])
+    assert all(isinstance(s, StubStage) for s in stages[6:])
     assert stages[2].requires_clustering and stages[3].requires_clustering
 
 
@@ -194,9 +245,11 @@ def real_client_factory(store: InMemoryStore) -> Iterator[Any]:
     opened: list[TestClient] = []
     storage = FakeDocumentStorage(objects={f"{DOCUMENT_ID}/{DOCUMENT_NAME}": DOCUMENT.encode("utf-8")})
 
-    def factory(llm_answers: list[str], embeddings: Any = (), clusterings: Any = ()) -> TestClient:
+    def factory(
+        llm_answers: list[Any], embeddings: Any = (), clusterings: Any = (), **settings: Any
+    ) -> TestClient:
         app = create_app(
-            make_settings(pipeline_stages="real", llm_model="modelo-x"),
+            make_settings(pipeline_stages="real", llm_model="modelo-x", **settings),
             generations_repository=InMemoryGenerationsRepository(store),
             documents_repository=InMemoryDocumentsRepository(store),
             documents_storage=storage,
@@ -221,8 +274,12 @@ def _stages(body: dict) -> dict[str, dict]:
 
 
 def test_document_produces_stories_requirements_and_clusters(real_client_factory, store: InMemoryStore) -> None:
-    """Fase 5 extremo a extremo: HU + RF persistidos, embeddings en memoria y clusters persistidos."""
-    client = real_client_factory([_llm_answer([RF, RF_LOCK])], [_embeddings(2)], [_clusters((0, 0))])
+    """Fases 5–7 extremo a extremo: HU, RF, clusters y casos de prueba persistidos (by_cluster)."""
+    client = real_client_factory(
+        [_llm_answer([RF, RF_LOCK]), _p6_answer(("RF-001",), ("RF-002",), ("RF-001", "RF-002"))],
+        [_embeddings(2)],
+        [_clusters((0, 0))],
+    )
     generation_id = client.post(URL, json={"document_id": str(DOCUMENT_ID)}).json()["id"]
 
     body = client.get(f"{URL}/{generation_id}").json()
@@ -255,10 +312,25 @@ def test_document_produces_stories_requirements_and_clusters(real_client_factory
     assert stages["p5"]["runtime_info"]["strategy"] == "by_cluster"
     assert stages["p5"]["runtime_info"]["units"] == 1
     assert stages["p5"]["runtime_info"]["requirements_covered"] == 2
+    # P6 (Fase 7): una llamada por unidad, CP globales y persistidos; summary poblado (D-F7-8).
+    assert stages["p6"]["warnings"] == []
+    assert stages["p6"]["runtime_info"]["strategy"] == "by_cluster"
+    assert stages["p6"]["runtime_info"]["prompt_version"] == "contexto@v2"
+    assert stages["p6"]["runtime_info"]["test_cases_count"] == 3
+    assert [(r["unit_id"], r["attempts"]) for r in stages["p6"]["llm_runs"]] == [("U-001", 1)]
+    assert list(store.test_cases[gid]) == ["CP-001", "CP-002", "CP-003"]
+    assert store.test_cases[gid]["CP-003"]["requirement_codes"] == ["RF-001", "RF-002"]
+    assert body["summary"] == {
+        "user_stories_count": 1,
+        "requirements_count": 2,
+        "clusters_count": 1,
+        "test_cases_count": 3,
+        "test_cases_failed_units": 0,
+    }
 
 
 def test_without_clustering_p3_and_p4_are_skipped(real_client_factory, store: InMemoryStore) -> None:
-    client = real_client_factory([_llm_answer([RF])])
+    client = real_client_factory([_llm_answer([RF]), _p6_answer(("RF-001",), ("RF-001",))])
     generation_id = client.post(
         URL, json={"document_id": str(DOCUMENT_ID), "configuration": {"semantic_clustering_enabled": False}}
     ).json()["id"]
@@ -272,6 +344,52 @@ def test_without_clustering_p3_and_p4_are_skipped(real_client_factory, store: In
     assert store.clusters == {}
     assert stages["p5"]["runtime_info"]["strategy"] == "by_user_story"
     assert stages["p5"]["runtime_info"]["units"] == 1
+    assert stages["p6"]["runtime_info"]["strategy"] == "by_user_story"
+    assert stages["p6"]["runtime_info"]["prompt_version"] == "contexto_sin_clustering@v2"
+    gid = next(iter(store.test_cases))
+    assert list(store.test_cases[gid]) == ["CP-001", "CP-002"]
+    assert body["summary"] == {
+        "user_stories_count": 1,
+        "requirements_count": 1,
+        "clusters_count": 0,
+        "test_cases_count": 2,
+        "test_cases_failed_units": 0,
+    }
+
+
+def test_all_p6_units_failing_with_zero_threshold_fails_generation(real_client_factory, store: InMemoryStore) -> None:
+    """D-F7-2 extremo a extremo: la única unidad falla tras reintentar y el umbral 0.0 hace fallar la generación."""
+    client = real_client_factory([_llm_answer([RF]), "no json", "no json"])
+    generation_id = client.post(
+        URL, json={"document_id": str(DOCUMENT_ID), "configuration": {"semantic_clustering_enabled": False}}
+    ).json()["id"]
+
+    body = client.get(f"{URL}/{generation_id}").json()
+
+    assert body["status"] == "failed"
+    stages = _stages(body)
+    assert stages["p6"]["status"] == "failed"
+    assert stages["p6"]["error_code"] == "GENERATION_THRESHOLD_EXCEEDED"
+    assert stages["p7"]["status"] == "pending"
+    assert body["summary"] is None
+    assert store.test_cases == {}
+
+
+def test_failed_unit_below_threshold_completes_with_warning(real_client_factory, store: InMemoryStore) -> None:
+    """D-F7-2: con umbral 1.0 la generación completa aunque la unidad falle; el summary lo refleja."""
+    client = real_client_factory([_llm_answer([RF]), "no json", "no json"], p6_failure_threshold=1.0)
+    generation_id = client.post(
+        URL, json={"document_id": str(DOCUMENT_ID), "configuration": {"semantic_clustering_enabled": False}}
+    ).json()["id"]
+
+    body = client.get(f"{URL}/{generation_id}").json()
+
+    assert body["status"] == "completed", body
+    stages = _stages(body)
+    codes = [w["code"] for w in stages["p6"]["warnings"]]
+    assert codes == ["UNIT_GENERATION_FAILED", "BATCH_RETRIED", "UNCOVERED_REQUIREMENTS"]
+    assert body["summary"]["test_cases_count"] == 0
+    assert body["summary"]["test_cases_failed_units"] == 1
 
 
 def test_single_requirement_completes_with_insufficient_requirements(real_client_factory, store: InMemoryStore) -> None:

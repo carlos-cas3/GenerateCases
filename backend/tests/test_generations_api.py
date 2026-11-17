@@ -83,6 +83,14 @@ def test_happy_path_completes_all_stages(client: TestClient) -> None:
         assert stages[key]["started_at"] is not None and stages[key]["completed_at"] is not None
         assert stages[key]["error_code"] is None
         assert stages[key]["warnings"] == [] and stages[key]["llm_runs"] == []
+    # D-F7-8: el summary se escribe al completar; con etapas simuladas no hay resultados persistidos.
+    assert body["summary"] == {
+        "user_stories_count": 0,
+        "requirements_count": 0,
+        "clusters_count": 0,
+        "test_cases_count": 0,
+        "test_cases_failed_units": 0,
+    }
 
 
 def test_p7_failure_does_not_fail_generation(client_factory: ClientFactory) -> None:

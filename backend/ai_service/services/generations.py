@@ -17,6 +17,7 @@ from ai_service.schemas.generations import (
     GenerationList,
     GenerationStage,
     GenerationStatus,
+    GenerationSummary,
     Pagination,
 )
 from ai_service.schemas.records import GenerationRecord
@@ -32,7 +33,7 @@ class TaskScheduler(Protocol):
 
 
 def to_generation(record: GenerationRecord) -> Generation:
-    """Construye la respuesta pública. `summary` es `null` en la Fase 1 (sin resultados persistidos)."""
+    """Construye la respuesta pública. `summary` es `null` hasta que el pipeline completa (D-F7-8)."""
     stages = []
     for stage in record.stages:
         definition = get_stage_definition(stage.stage_key)
@@ -61,7 +62,7 @@ def to_generation(record: GenerationRecord) -> Generation:
             method_type=record.method_type,
         ),
         stages=stages,
-        summary=None,
+        summary=GenerationSummary.model_validate(record.summary) if record.summary is not None else None,
         error_message=record.error_message,
         created_at=record.created_at,
         started_at=record.started_at,

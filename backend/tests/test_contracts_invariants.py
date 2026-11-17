@@ -287,11 +287,13 @@ def test_test_case_codes_are_global_and_consecutive() -> None:
     assert [case.code for case in f.p6_output(units=(f.unit_output(), ok)).test_cases] == ["CP-001", "CP-002"]
 
 
-def test_p6_stops_at_the_first_failed_unit() -> None:
+def test_p6_admits_several_failed_units() -> None:
+    """D-F7-1: P6 procesa todas las unidades; puede registrar más de una fallida."""
     failure = p6.UnitFailure(unit_id="U-002", error_code="UNIT_GENERATION_FAILED", message="m")
-    assert f.p6_output(failed_units=(failure,)).failed_units == (failure,)
-    with pytest.raises(ValidationError):
-        f.p6_output(failed_units=(failure, failure.model_copy(update={"unit_id": "U-003"})))
+    several = (failure, failure.model_copy(update={"unit_id": "U-003"}))
+    assert f.p6_output(failed_units=several).failed_units == several
+    with pytest.raises(ValidationError, match="unidades fallidas repetidos"):
+        f.p6_output(failed_units=(failure, failure))
     with pytest.raises(ValidationError, match="fallida"):
         f.p6_output(failed_units=(failure.model_copy(update={"unit_id": "U-001"}),))
 
@@ -306,6 +308,18 @@ def test_p6_input_context_belongs_to_the_generation() -> None:
         p6.P6Input(generation_id=uuid4(), context=f.generation_context(), config=f.p6_config())
 
 
-def test_p6_config_only_supports_failing_the_stage() -> None:
+def test_p6_config_only_supports_continuing_after_a_failure() -> None:
+    """D-F7-1: el único modo es seguir con la siguiente unidad."""
+    assert f.p6_config().on_unit_failure == "continue"
     with pytest.raises(ValidationError):
-        p6.P6Config(prompt_version="v", llm=f.LLM, max_retries=1, on_unit_failure="continue")
+        p6.P6Config(prompt_version="v", llm=f.LLM, max_retries=1, on_unit_failure="fail")
+
+
+def test_p6_config_threshold_and_case_limits() -> None:
+    config = f.p6_config()
+    assert (config.failure_threshold, config.max_cases_multiplier, config.max_cases_absolute) == (0.0, 3, 50)
+    assert config.max_cases_for(2) == 6
+    assert config.max_cases_for(40) == 50
+    for invalid in ({"failure_threshold": 1.5}, {"failure_threshold": -0.1}, {"max_cases_multiplier": 0}, {"max_cases_absolute": 0}):
+        with pytest.raises(ValidationError):
+            p6.P6Config(prompt_version="v", llm=f.LLM, max_retries=1, **invalid)

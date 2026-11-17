@@ -108,22 +108,21 @@ class GenerationStage(BaseModel):
     order: int = Field(ge=1, le=7)
 
 
-class MetricSummary(BaseModel):
-    metric_name: str
-    metric_value: float | None
-    formula_version: str
-
-
 class GenerationSummary(BaseModel):
-    """Conteos calculados desde datos persistidos. No se usa en la Fase 1 (`summary = null`)."""
+    """Conteos de la generación (D-F7-8). Se escribe al completar el pipeline; `null` hasta entonces.
 
-    user_stories_count: int | None = None
-    invalid_user_stories_count: int | None = None
-    requirements_count: int | None = None
-    clusters_count: int | None = None
-    test_cases_count: int | None = None
-    validated_relations_count: int | None = None
-    metrics: list[MetricSummary] = Field(default_factory=list)
+    - `user_stories_count`, `requirements_count`, `clusters_count`, `test_cases_count`: filas
+      persistidas de la generación (`clusters_count` es 0 con `by_user_story`).
+    - `test_cases_failed_units`: unidades de P6 en `P6Output.failed_units`.
+
+    Los conteos de relaciones validadas y las métricas quedan para P7 (Fase 8).
+    """
+
+    user_stories_count: int = Field(ge=0)
+    requirements_count: int = Field(ge=0)
+    clusters_count: int = Field(ge=0)
+    test_cases_count: int = Field(ge=0)
+    test_cases_failed_units: int = Field(ge=0)
 
 
 class Generation(BaseModel):
