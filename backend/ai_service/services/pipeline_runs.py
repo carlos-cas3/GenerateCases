@@ -38,6 +38,7 @@ from ai_service.repositories.generations import GenerationsRepository
 from ai_service.schemas.generations import (
     ACTIVE_GENERATION_STATUSES,
     GenerationStatus,
+    StageKey,
     StageStatus,
 )
 
@@ -131,9 +132,16 @@ class RepositoryProgressReporter:
 class PipelineRunService:
     """Adapta una generación persistida a una ejecución del orquestador."""
 
-    def __init__(self, repository: GenerationsRepository, stages: Sequence[StageBase]) -> None:
+    def __init__(
+        self,
+        repository: GenerationsRepository,
+        stages: Sequence[StageBase],
+        *,
+        stop_after: StageKey | None = None,
+    ) -> None:
         self._repository = repository
         self._stages = stages
+        self._stop_after = stop_after
 
     async def run(self, context: PipelineContext) -> None:
         """Ejecuta el pipeline completo. Nunca propaga excepciones (corre en segundo plano)."""
@@ -147,7 +155,7 @@ class PipelineRunService:
             )
             logger.info("Pipeline iniciado generation_id=%s", generation_id)
             reporter = RepositoryProgressReporter(self._repository, generation_id, context)
-            await PipelineOrchestrator(self._stages, reporter).run(context)
+            await PipelineOrchestrator(self._stages, reporter, stop_after=self._stop_after).run(context)
         except Exception:
             logger.exception("Error no previsto en el pipeline generation_id=%s", generation_id)
             await self._fail_safely(generation_id)

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     pipeline_stages: PipelineStagesLiteral = "real"
     pipeline_stub_delay_seconds: float = Field(default=2.0, ge=0)
     pipeline_stub_fail_at_stage: StageKeyLiteral | None = None
+    # Detiene el pipeline tras esta etapa (calibración, calibracion_stop.md). None = run completo.
+    pipeline_stop_after_stage: StageKeyLiteral | None = None
     default_method_type: str = Field(default="llm_pipeline", min_length=1)
 
     # Subida de documentos: límite por archivo (20 MiB) y bucket privado de Supabase Storage.
@@ -103,12 +105,22 @@ class Settings(BaseSettings):
     p6_max_cases_multiplier: int = Field(default=3, gt=0)
     p6_max_cases_absolute: int = Field(default=50, gt=0)
 
-    @field_validator("pipeline_stub_fail_at_stage", "llm_base_url", "llm_model", mode="before")
+    @field_validator(
+        "pipeline_stub_fail_at_stage", "pipeline_stop_after_stage", "llm_base_url", "llm_model", mode="before"
+    )
     @classmethod
     def _empty_as_none(cls, value: object) -> object:
         """Permite dejar la variable vacía en `.env` (fallo simulado desactivado, sin URL base)."""
         if isinstance(value, str) and not value.strip():
             return None
+        return value
+
+    @field_validator("pipeline_stop_after_stage", mode="before")
+    @classmethod
+    def _lower_stage_key(cls, value: object) -> object:
+        """Acepta `P4` igual que `p4` en `PIPELINE_STOP_AFTER_STAGE`."""
+        if isinstance(value, str):
+            return value.strip().lower()
         return value
 
     @field_validator("p3_input_template")

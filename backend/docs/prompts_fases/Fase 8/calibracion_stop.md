@@ -1,6 +1,6 @@
 # Fase 8 — `stop_after`: parada limpia del pipeline para calibración
 
-> **Estado:** 🔲 pendiente de implementar. Este archivo es la **especificación** de una
+> **Estado:** ✅ implementado (2026-11-17; suite rápida 540 tests). Este archivo es la **especificación** de una
 > capacidad del orquestador: detener la ejecución tras la etapa N, dejando las restantes
 > `skipped` y la generación `completed` con `summary` parcial. Motivada por calibración.
 > **No es una prueba** ni pertenece a la capa de integración de [`fase8.md`](fase8.md); es
@@ -213,16 +213,23 @@ Estos son unitarios del orquestador (rápidos, con stubs); no requieren Supabase
 
 ## Criterios de cierre
 
-- [ ] `PipelineOrchestrator` acepta `stop_after` y omite por `order` vía `StageSkipped`.
-- [ ] `PIPELINE_STOP_AFTER_STAGE` leída desde `config.py` y pasada por `PipelineRunService`.
-- [ ] `None` = run completo; ningún test existente cambia (suite de 533 sigue verde).
-- [ ] Una corrida con `stop_after=p4` deja P5–P7 `skipped`, generación `completed` y `summary`
+- [x] `PipelineOrchestrator` acepta `stop_after` y omite por `order` vía `StageSkipped`.
+- [x] `PIPELINE_STOP_AFTER_STAGE` leída desde `config.py` y pasada por `PipelineRunService`.
+- [x] `None` = run completo; ningún test existente cambia (533 previos verdes; 540 con los nuevos).
+- [x] Una corrida con `stop_after=p4` deja P5–P7 `skipped`, generación `completed` y `summary`
   con `test_cases_count=0`.
-- [ ] Fallo bloqueante antes del tope sigue fallando la generación (no se enmascara).
-- [ ] Pruebas del orquestador añadadas y pasando.
-- [ ] `pipeline_roadmap.md` y `fase8.md` actualizados con la referencia.
+- [x] Fallo bloqueante antes del tope sigue fallando la generación (no se enmascara).
+- [x] Pruebas del orquestador añadidas y pasando.
+- [x] `pipeline_roadmap.md` y `fase8.md` actualizados con la referencia.
 
 ---
+
+## Notas de implementación
+
+- `PIPELINE_STOP_AFTER_STAGE` admite mayúsculas (`P4` ≡ `p4`) y vacío (= `None`).
+- `main.py` convierte el literal a `StageKey` y lo pasa a `PipelineRunService(..., stop_after=...)`.
+- Tests: `tests/test_pipeline.py` (`test_stop_after_*`, `test_run_service_stop_after_p4_*`,
+  `test_settings_stop_after_stage_*`): 7 nuevos.
 
 ## Referencias
 

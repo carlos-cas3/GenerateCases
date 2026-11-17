@@ -171,3 +171,101 @@ async def test_stage_error_code_and_message_are_persisted(store) -> None:
     assert p2.error_code == "LLM_INVALID_OUTPUT"
     assert p2.error_message == error.message
     assert all(s.status == StageStatus.PENDING for s in record.stages if s.stage_order > 2)
+
+
+# --- stop_after: parada limpia tras la etapa N (calibracion_stop.md) ---
+
+
+async def test_stop_after_p4_skips_tail_and_completes() -> None:
+    reporter = RecordingReporter()
+    orchestrator = PipelineOrchestrator(build_stub_stages(0), reporter, stop_after=StageKey.P4)
+    ok = await orchestrator.run(_context(clustering=True))
+
+    assert ok is True
+    assert _summary(reporter.events) == [
+        "stage_started:p1", "stage_completed:p1",
+        "stage_started:p2", "stage_completed:p2",
+        "stage_started:p3", "stage_completed:p3",
+        "stage_started:p4", "stage_completed:p4",
+        "stage_skipped:p5", "stage_skipped:p6", "stage_skipped:p7",
+        "pipeline_completed:",
+    ]
+
+
+async def test_stop_after_p1_runs_only_p1() -> None:
+    reporter = RecordingReporter()
+    ok = await PipelineOrchestrator(build_stub_stages(0), reporter, stop_after=StageKey.P1).run(_context())
+
+    assert ok is True
+    assert _summary(reporter.events) == [
+        "stage_started:p1", "stage_completed:p1",
+        "stage_skipped:p2", "stage_skipped:p3", "stage_skipped:p4",
+        "stage_skipped:p5", "stage_skipped:p6", "stage_skipped:p7",
+        "pipeline_completed:",
+    ]
+
+
+async def test_stop_after_none_runs_full_pipeline() -> None:
+    reporter = RecordingReporter()
+    ok = await PipelineOrchestrator(build_stub_stages(0), reporter, stop_after=None).run(_context())
+
+    assert ok is True
+    assert _summary(reporter.events) == [
+        f"{kind}:p{n}" for n in range(1, 8) for kind in ("stage_started", "stage_completed")
+    ] + ["pipeline_completed:"]
+
+
+async def test_stop_after_p4_without_clustering() -> None:
+    reporter = RecordingReporter()
+    orchestrator = PipelineOrchestrator(build_stub_stages(0), reporter, stop_after=StageKey.P4)
+    ok = await orchestrator.run(_context(clustering=False))
+
+    assert ok is True
+    assert _summary(reporter.events) == [
+        "stage_started:p1", "stage_completed:p1",
+        "stage_started:p2", "stage_completed:p2",
+        "stage_skipped:p3", "stage_skipped:p4",
+        "stage_skipped:p5", "stage_skipped:p6", "stage_skipped:p7",
+        "pipeline_completed:",
+    ]
+
+
+async def test_stop_after_does_not_mask_blocking_failure() -> None:
+    reporter = RecordingReporter()
+    orchestrator = PipelineOrchestrator(build_stub_stages(0, "p2"), reporter, stop_after=StageKey.P4)
+    ok = await orchestrator.run(_context())
+
+    assert ok is False
+    assert _summary(reporter.events) == [
+        "stage_started:p1", "stage_completed:p1", "stage_started:p2", "stage_failed:p2", "pipeline_failed:",
+    ]
+
+
+async def test_run_service_stop_after_p4_completes_with_partial_summary(store) -> None:
+    repo = InMemoryGenerationsRepository(store)
+    generation_id = add_generation(store, document_id=DOCUMENT_ID, status=GenerationStatus.QUEUED)
+    context = _context()
+    context.generation_id = generation_id
+
+    await PipelineRunService(repo, build_stub_stages(0), stop_after=StageKey.P4).run(context)
+
+    record = await repo.get_by_id(generation_id)
+    assert record.status == GenerationStatus.COMPLETED
+    statuses = {s.stage_key.value: s.status for s in record.stages}
+    assert all(statuses[k] == StageStatus.COMPLETED for k in ("p1", "p2", "p3", "p4"))
+    assert all(statuses[k] == StageStatus.SKIPPED for k in ("p5", "p6", "p7"))
+    assert record.summary is not None
+    summary = record.summary if isinstance(record.summary, dict) else record.summary.model_dump()
+    assert summary["test_cases_count"] == 0
+    assert summary["test_cases_failed_units"] == 0
+
+
+def test_settings_stop_after_stage_accepts_case_and_empty(monkeypatch) -> None:
+    from ai_service.config import Settings
+
+    monkeypatch.setenv("PIPELINE_STOP_AFTER_STAGE", "P4")
+    assert Settings(_env_file=None).pipeline_stop_after_stage == "p4"
+    monkeypatch.setenv("PIPELINE_STOP_AFTER_STAGE", "")
+    assert Settings(_env_file=None).pipeline_stop_after_stage is None
+    monkeypatch.delenv("PIPELINE_STOP_AFTER_STAGE")
+    assert Settings(_env_file=None).pipeline_stop_after_stage is None

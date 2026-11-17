@@ -20,6 +20,7 @@ from ai_service.pipeline.stages import build_real_stages, build_stub_stages
 from ai_service.repositories.documents import DocumentsRepository  # puerto
 from ai_service.repositories.generations import GenerationsRepository  # puerto
 from ai_service.repositories.pipeline_results import PipelineResultsRepository  # puerto
+from ai_service.schemas.generations import StageKey
 from ai_service.services.documents import DocumentsService
 from ai_service.services.generations import GenerationsService
 from ai_service.services.pipeline_runs import PipelineRunService, recover_interrupted_generations
@@ -140,10 +141,16 @@ def create_app(
                 stages = build_stub_stages(
                     app_settings.pipeline_stub_delay_seconds, app_settings.pipeline_stub_fail_at_stage
                 )
+            # Parada limpia tras la etapa N (calibración, calibracion_stop.md). None = run completo.
+            stop_after = (
+                StageKey(app_settings.pipeline_stop_after_stage)
+                if app_settings.pipeline_stop_after_stage is not None
+                else None
+            )
             app.state.generations_service = GenerationsService(
                 generations=generations_repo,
                 documents=documents_repo,
-                pipeline_runs=PipelineRunService(generations_repo, stages),
+                pipeline_runs=PipelineRunService(generations_repo, stages, stop_after=stop_after),
                 default_method_type=app_settings.default_method_type,
             )
             app.state.documents_service = DocumentsService(

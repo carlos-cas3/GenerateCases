@@ -1,6 +1,7 @@
 # Fase 8 — Pruebas de integración contra Supabase real (capa de persistencia)
 
-> **Estado:** 🔲 pendiente de implementar. Este archivo es el **plan** de la primera workstream
+> **Estado:** 🟡 tests escritos (T-F8-01 a T-F8-06, 2026-11-17), **pendientes de ejecutar** contra
+> Supabase: falta decidir el aislamiento (D-F8-3). Sin esa decisión se `skip`. Este archivo es el **plan** de la primera workstream
 > de la Fase 8: una capa de pruebas de integración que ejecuta las RPC y la máquina de estados
 > de generaciones contra Postgres real, aisladamente del LLM y del pipeline.
 > **Fase anterior:** Fase 7 (P6 generación de casos) — ✅ cerrada (533 tests), salvo la primera
@@ -250,9 +251,9 @@ T-F8-07 (roadmap + cierre documental)
 
 La capa de integración está completa cuando **todos** estos puntos se cumplen:
 
-- [ ] `pytest` (sin flags) sigue siendo la suite rápida de 533 tests; no toca Supabase.
+- [x] `pytest` (sin flags) sigue siendo la suite rápida (540 tras `stop_after`); no toca Supabase.
 - [ ] `RUN_SUPABASE_TESTS=1 pytest -m integration` ejecuta la capa nueva y pasa.
-- [ ] Sin credenciales o sin la variable, los tests se `skip` (no fallan).
+- [x] Sin credenciales o sin la variable, los tests se `skip` (no fallan).
 - [ ] Las cuatro RPC tienen happy-path que relee y compara filas.
 - [ ] FK / NOT NULL / unique-T-02 se rechazan con el `sqlstate` esperado.
 - [ ] Idempotencia de `persist_p1_user_stories` verificada (no duplica al re-ejecutar).
@@ -263,6 +264,29 @@ La capa de integración está completa cuando **todos** estos puntos se cumplen:
 - [ ] Advertencias 7 y 10 del roadmap resueltas; `cierre_documental_fase8.md` generado.
 
 ---
+
+## Estado de implementación (2026-11-17)
+
+| Tarea | Estado | Archivo |
+|---|---|---|
+| T-F8-01 | ✅ | `pytest.ini` (markers + `addopts`), `tests/conftest_integration.py`, `tests/integration/conftest.py` |
+| T-F8-02 | ✅ escrito | `tests/integration/test_persist_rpc.py` (4 happy path) |
+| T-F8-03 | ✅ escrito | `tests/integration/test_persist_rpc.py` (FK, NOT NULL, unique T-02, idempotencia P1) |
+| T-F8-04/05/06 | ✅ escrito | `tests/integration/test_generation_lifecycle.py` |
+| T-F8-07 | 🔲 | Tras la primera ejecución verde: resolver advertencias 7 y 10 y generar `cierre_documental_fase8.md` |
+
+**D-F8-3 (pendiente de decisión humana).** El fixture soporta ambas opciones:
+
+1. `SUPABASE_URL_TEST` / `SUPABASE_SERVICE_ROLE_KEY_TEST` → proyecto aparte (preferido si existe).
+2. `SUPABASE_TESTS_ALLOW_SHARED_PROJECT=1` → usa `SUPABASE_URL` del `.env`. Cada test crea su
+   propio documento (`fase8-integration-<uuid>.txt`, solo fila, sin Storage) y sus generaciones con
+   UUID nuevos; el teardown fuerza `failed` si quedó activa y borra en cascade con
+   `delete_generation_if_final`, y luego borra el documento, aunque el test falle.
+
+Sin ninguna de las dos, los tests se saltan aunque `RUN_SUPABASE_TESTS=1`.
+
+Ejecución: `RUN_SUPABASE_TESTS=1 pytest -m integration` (15 tests). `pytest` sin flags sigue
+siendo la suite rápida (540 tests, integración `deselected`).
 
 ## Advertencias heredadas relevantes
 

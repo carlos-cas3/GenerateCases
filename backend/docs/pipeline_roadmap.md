@@ -230,9 +230,11 @@ P7 no se diseña ni implementa hasta esta fase. Lo que se sabe hasta ahora:
 
 Otros cierres pendientes:
 - [ ] SSE (`GET /api/v1/generations/{id}/events`) en sustitución del polling
-- [ ] Pruebas de integración end-to-end con Supabase real
-- [ ] `stop_after` (parada limpia tras la etapa N) para calibración — ver
-      `prompts_fases/Fase 8/calibracion_stop.md`
+- [ ] Pruebas de integración con Supabase real — capa de persistencia **escrita** (`tests/integration/`,
+      `-m integration`), pendiente de ejecutar hasta decidir el aislamiento (D-F8-3 de
+      `prompts_fases/Fase 8/fase8.md`). El E2E con Ollama queda aparte.
+- [x] `stop_after` (parada limpia tras la etapa N) para calibración — `PIPELINE_STOP_AFTER_STAGE`;
+      ver `prompts_fases/Fase 8/calibracion_stop.md`
 
 ---
 
@@ -268,7 +270,8 @@ Otros cierres pendientes:
    Calibrarlo con `PIPELINE_STOP_AFTER_STAGE=p4` para iterar sin pagar el LLM de P6 (ver
    `prompts_fases/Fase 8/calibracion_stop.md`).
 7. **Sin prueba de `persist_p4_clusters` contra Postgres real** — validada con el fake en memoria y
-   tests del adaptador; conviene un smoke test contra Supabase.
+   tests del adaptador; conviene un smoke test contra Supabase. Test escrito en
+   `tests/integration/test_persist_rpc.py` (Fase 8); se resuelve tras su primera ejecución verde.
 8. **Calibración de `P5_MAX_TOKENS_PER_UNIT` pendiente** — el estimado de P5 (caracteres / 4) es
    heurístico y puede desviarse del tokenizador del modelo de P6. `exceeds_limit` solo informa:
    validar con documentos reales y ajustar por env var (ver `cierre_documental_fase6.md`).
@@ -279,7 +282,8 @@ Otros cierres pendientes:
    Fase 7 el `label` no se envía al LLM de P6.
 10. **Sin prueba de `persist_p6_unit` ni de `summary` contra Postgres real** — validados con el fake en
     memoria; conviene un smoke test contra Supabase (columna `generations.summary` incluida en las
-    migraciones aditivas de `schema.sql`; confirmar que está aplicada).
+    migraciones aditivas de `schema.sql`; confirmar que está aplicada). Tests escritos en
+   `tests/integration/` (Fase 8); se resuelve tras su primera ejecución verde.
 11. **Generación `failed` en P6 con unidades ya persistidas** — si el umbral solo se supera por fallos
     de **persistencia**, las unidades persistidas antes quedan en la BD de una generación `failed`.
     Con fallos del LLM el umbral se evalúa antes de persistir y no queda nada a medias.
