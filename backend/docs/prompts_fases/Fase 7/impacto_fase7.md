@@ -118,13 +118,25 @@ async def update_summary(self, generation_id: UUID, summary: GenerationSummary) 
 
 ### 11. Adaptador Supabase de generaciones — T-F7-05
 
-Implementar `build_summary` (consultas de conteo a Supabase) y `update_summary`
-(escritura en `generations.config_snapshot` o columna dedicada según el schema).
+`build_summary`: consultas de conteo a Supabase (HU, RF, clusters, casos).
+`update_summary`: escribe en la columna `summary jsonb` de `generations`
+(añadida en `schema.sql` con `ALTER TABLE generations ADD COLUMN IF NOT EXISTS summary jsonb`
+— ya incluida en la sección de migraciones aditivas del schema).
 
-### 12. `ai_service/repositories/in_memory.py` — T-F7-05
+### 12. `ai_service/repositories/in_memory.py` — T-F7-04 y T-F7-05
 
-Implementar `build_summary` y `update_summary` en el fake contando desde
-`InMemoryStore`.
+**T-F7-04** — añadir en `InMemoryStore`:
+```python
+test_cases: dict[UUID, dict[str, dict[str, Any]]] = field(default_factory=dict)
+# gid → code → fila  (mismo patrón que `requirements`)
+```
+
+Implementar `persist_p6_unit` en `InMemoryPipelineResultsRepository`:
+- Idempotencia por `(generation_id, code)`: ON CONFLICT DO UPDATE.
+- FK: los `requirement_codes` deben existir en `store.requirements[generation_id]`.
+
+**T-F7-05** — implementar `build_summary` y `update_summary` en
+`InMemoryGenerationsRepository` contando desde `InMemoryStore`.
 
 ### 13. `ai_service/services/pipeline_runs.py` — T-F7-05
 

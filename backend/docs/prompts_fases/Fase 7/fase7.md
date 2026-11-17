@@ -226,13 +226,17 @@ verificar:
       contexto, y prohíbe enlazar RF de contexto en `requirement_codes`.
 - [ ] `contexto_sin_clustering.md` no menciona clustering ni clusters (el LLM
       no debe saber que existe la otra variante).
-- [ ] Ambos prompts instruyen al LLM sobre el máximo de casos (`P6_MAX_CASES_MULTIPLIER`
-      y `P6_MAX_CASES_ABSOLUTE`) — esto requiere que el tope se inyecte dinámicamente
-      en el texto del prompt en tiempo de ejecución, no hardcodeado.
 - [ ] Ambos prompts tienen el mismo formato de salida y referencian el mismo
       `TestCaseOutputSpec`.
 
-Si se modifica un prompt, actualizar `P6_PROMPT_VERSION` en `.env` y `.env.example`.
+**Los archivos `.md` no llevan placeholders.** El tope de casos no se inyecta en el
+texto del prompt base sino en el mensaje de usuario que el stage construye por unidad
+(ver §Construcción del mensaje). El `.md` solo contiene instrucciones fijas; el
+contenido variable (tope, RF, HU, schema) va en el mensaje de usuario armado en Python.
+Esto evita versionar el `.md` cada vez que cambian los parámetros de configuración.
+
+Si se modifica la redacción del prompt, actualizar `P6_PROMPT_VERSION` en `.env` y
+`.env.example`.
 
 ---
 
@@ -299,15 +303,21 @@ Pasos de la implementación:
 
 #### Construcción del mensaje al LLM
 
-El mensaje `user` incluye:
-- El tope de casos para esta unidad (instrucción explícita).
-- Los RF objetivo con su `description`.
-- Los RF de contexto con su `description` (solo en `by_cluster`).
-- Las HU con `original_text` y secciones.
-- El JSON Schema de `TestCaseOutputSpec` (ya incluido en `GenerationContext.output_spec`).
+El stage construye **dos partes** por unidad:
 
-No hardcodear el tope en el prompt base — inyectarlo dinámicamente al construir
-el mensaje por unidad.
+- **System message**: el texto del prompt resuelto por `resolve_p6_prompt` tal cual
+  (sin placeholders, el `.md` no se modifica).
+- **User message**: bloque armado en Python con el contenido variable de la unidad:
+  1. Tope de casos: `f"Genera como máximo {max_cases} casos de prueba para esta unidad."`
+     donde `max_cases = min(config.max_cases_multiplier × len(unit.requirements), config.max_cases_absolute)`.
+  2. RF objetivo con su `code` y `description`.
+  3. RF de contexto con su `code` y `description` (solo en `by_cluster`; omitir la sección si está vacía).
+  4. HU de origen con `original_text` y secciones.
+  5. JSON Schema de salida: `context.output_spec.json_schema` serializado como JSON.
+
+Este diseño desacopla las instrucciones fijas (`.md`) del contenido variable (Python),
+y hace que `P6_MAX_CASES_MULTIPLIER` y `P6_MAX_CASES_ABSOLUTE` lleguen al LLM desde
+las variables de entorno sin tocar ningún archivo de texto.
 
 ### T-F7-04 · Caller `persist_p6_unit`
 
@@ -318,12 +328,17 @@ async def persist_p6_unit(self, generation_id: UUID, payload: dict) -> None: ...
 
 En `repositories/supabase_pipeline_results.py` (adaptador Supabase):
 - Llama a la RPC `persist_p6_unit` con `asyncio.to_thread`.
+- Usa el método `_call` existente; misma firma que `persist_p4_clusters`.
 - Traduce errcodes: `23502` → `MissingIdentifierError`, `23503` →
   `InvalidReferenceError`, `23505` → `DuplicateEntryError`, resto → `PersistenceError`.
 
 En `repositories/in_memory.py` (fake):
-- Almacena los casos en `InMemoryStore.test_cases`.
-- Replica idempotencia por `(generation_id, code)`.
+- Añadir en `InMemoryStore`:
+  ```python
+  test_cases: dict[UUID, dict[str, dict[str, Any]]] = field(default_factory=dict)
+  # gid → code → fila  (mismo patrón que `requirements`)
+  ```
+- Replica idempotencia por `(generation_id, code)`: ON CONFLICT DO UPDATE igual que la RPC.
 - Valida FK: los `requirement_codes` deben existir en `functional_requirements`.
 
 ### T-F7-05 · Poblar `summary` en la API
