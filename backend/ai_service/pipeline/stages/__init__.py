@@ -19,7 +19,7 @@ from ai_service.pipeline.contracts.p6 import P6Config
 from ai_service.pipeline.prompts.p2 import resolve_p2_prompt
 from ai_service.pipeline.prompts.p6 import resolve_p6_prompt
 from ai_service.pipeline.stages.base import StageBase, StageError, StageResult, StubStage
-from ai_service.pipeline.stages.p1_normalize import NormalizeStage, NormalizeStubStage
+from ai_service.pipeline.stages.p1_normalize import NormalizeStage, NormalizeStubStage, SUPPORTED_RULES_VERSIONS
 from ai_service.pipeline.stages.p2_requirements import RequirementsStage, RequirementsStubStage
 from ai_service.pipeline.stages.p3_embeddings import EmbeddingsStage, EmbeddingsStubStage
 from ai_service.pipeline.stages.p4_clustering import ClusteringStage, ClusteringStubStage
@@ -53,6 +53,11 @@ def build_stub_stages(delay_seconds: float, fail_at_stage: str | None = None) ->
 
 
 def build_p1_config(settings: Settings) -> P1Config:
+    if settings.p1_rules_version not in SUPPORTED_RULES_VERSIONS:
+        raise ConfigurationError(
+            f"P1_RULES_VERSION no soportada: {settings.p1_rules_version} "
+            f"(válidas: {', '.join(sorted(SUPPORTED_RULES_VERSIONS))})."
+        )
     return P1Config(
         rules_version=settings.p1_rules_version,
         language=settings.p1_language,

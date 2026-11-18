@@ -35,13 +35,33 @@ Como <rol>, quiero <objetivo/acción>, para <beneficio/meta>.
 | Elemento | Marcador | Patrón (regex) | Campo del contrato |
 |---|---|---|---|
 | Inicio de HU | línea que empieza con `## ` | `^##\s+.+$` → va a `P1Config.story_delimiter_pattern` | parte el documento en bloques |
-| Declaración canónica | primera línea no vacía tras el `##`, forma "Como X, quiero Y, para Z" | `^Como\s+(.+?),\s+quiero\s+(.+?)(?:,?\s*para\s+(.+?))?\s*\.?\s*$` | `role`, `objective` (→ `action`), `benefit` (→ `goal`) |
+| Declaración canónica | primera línea no vacía tras el `##`, forma "Como X, quiero Y, para Z" | v1/v2 según `P1Config.rules_version` (ver §2.1) | `role`, `objective` (→ `action`), `benefit` (→ `goal`) |
 | Sección de contenido | encabezado de nivel 3 `### ` | `^###\s+.+$` | `content_sections` (`kind` = título, `text` = cuerpo) |
 
 - `position` lo asigna P1 por orden de aparición (1, 2, 3…).
 - Los códigos `HU-xxx` **los asigna el pipeline**, no el documento.
 - La regex de la declaración canónica es parte de la heurística de P1 (no de `P1Config`); si se
   quiere configurable, se añade a `P1Config`. Hoy se versiona vía `rules_version`.
+
+### 2.1 Versiones de la declaración canónica
+
+- **`v1` (legado)** — parte en el primer `"para"`:
+
+  ```regex
+  ^Como\s+(.+?),\s+quiero\s+(.+?)(?:,?\s*\bpara\s+(.+?))?\s*\.?\s*$
+  ```
+
+  Corta complementos como `"para pacientes"` o `"para los usuarios…"` y los toma como
+  beneficio. Se conserva solo para reproducir sondeos antiguos.
+
+- **`v2` (actual)** — `"para"` solo introduce beneficio si le sigue `"que"` o un infinitivo:
+
+  ```regex
+  ^Como\s+(.+?),\s+quiero\s+(.+?)(?:,?\s*\bpara\s+(?=que\b|(?:no\s+)?[a-záéíóúüñ]+(?:ar|er|ir)\b)(.+?))?\s*\.?\s*$
+  ```
+
+  Corrige esos casos: `"para pacientes"` queda dentro del objetivo y `"…acceso, para que no se
+  filtren datos"` separa bien el beneficio. No reconoce `"de modo que"` como beneficio.
 
 ---
 

@@ -263,7 +263,10 @@ Otros cierres pendientes:
    Las RPCs `persist_p1_user_stories`, `persist_p2_requirements`, `persist_p4_clusters` y
    `persist_p6_unit` existen y son idempotentes. Con `PIPELINE_STAGES=real` P1 ya no falla con
    `PERSISTENCE_FAILED`.
-5. **Heurística de P1 sensible a "para"** — la declaración se parte en la primera aparición de la palabra "para" (`… quiero un botón para exportar, para …` → objetivo "un botón"). Ver `cierre_documental_fase4.md`.
+5. **~~Heurística de P1 sensible a "para"~~ — RESUELTO (2026-11-17):** `P1_RULES_VERSION=v2`
+   solo abre beneficio si `"para"` va seguido de `"que"` o un infinitivo, así que complementos
+   como `"para pacientes"` o `"para los usuarios…"` ya no cortan el objetivo. `v1` se conserva
+   para reproducir sondeos antiguos. Ver `plantilla_hu.md` §2.1 y `bitacora/p1.md`.
 6. **Calibración de HDBSCAN pendiente** — `P4_MIN_CLUSTER_SIZE=2` / `P4_MIN_SAMPLES=1` son valores
    iniciales. Validar con documentos reales y ajustar por env var. Con muy pocos RF (≤3 en pruebas
    locales) HDBSCAN suele marcar todo como ruido → D-32 (`INSUFFICIENT_REQUIREMENTS`).

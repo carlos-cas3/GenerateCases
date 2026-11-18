@@ -109,12 +109,17 @@ def test_build_p2_config_requires_llm_model() -> None:
         build_p2_config(make_settings(llm_model=None))
 
 
+def test_build_p1_config_rejects_unknown_rules_version() -> None:
+    with pytest.raises(ConfigurationError, match="P1_RULES_VERSION"):
+        build_p1_config(make_settings(p1_rules_version="v9"))
+
+
 def test_build_configs_from_settings() -> None:
     settings = make_settings(llm_model="gpt-x", llm_provider="openai", p2_max_stories_per_call=3, p2_max_retries=1)
     p1 = build_p1_config(settings)
     p2 = build_p2_config(settings)
 
-    assert (p1.rules_version, p1.language, p1.story_delimiter_pattern, p1.max_story_chars) == ("v1", "es", r"^##\s+.+$", 5000)
+    assert (p1.rules_version, p1.language, p1.story_delimiter_pattern, p1.max_story_chars) == ("v2", "es", r"^##\s+.+$", 5000)
     assert (p2.llm.provider, p2.llm.model, p2.max_stories_per_call, p2.max_retries, p2.prompt_version) == (
         "openai", "gpt-x", 3, 1, "v1",
     )

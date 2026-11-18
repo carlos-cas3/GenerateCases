@@ -41,12 +41,23 @@ from ai_service.schemas.generations import StageKey, StageWarning
 
 logger = logging.getLogger(__name__)
 
-# Declaración canónica de `plantilla_hu.md` §2. Única diferencia: `\b` antes de "para" para no
-# partir palabras que lo contienen ("comparar", "separar").
-CANONICAL_STATEMENT = re.compile(
-    r"^Como\s+(.+?),\s+quiero\s+(.+?)(?:,?\s*\bpara\s+(.+?))?\s*\.?\s*$",
-    re.IGNORECASE | re.DOTALL,
-)
+# Declaración canónica de `plantilla_hu.md` §2, versionada por `P1Config.rules_version`.
+# - v1: parte en el primer "para" (legado; corta complementos como "para pacientes").
+# - v2: un "para" solo introduce el beneficio si le sigue "que" o un infinitivo, y `\b` antes
+#   de "para" evita partir palabras que lo contienen ("comparar", "separar").
+STATEMENT_RULES: dict[str, re.Pattern[str]] = {
+    "v1": re.compile(
+        r"^Como\s+(.+?),\s+quiero\s+(.+?)(?:,?\s*\bpara\s+(.+?))?\s*\.?\s*$",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    "v2": re.compile(
+        r"^Como\s+(.+?),\s+quiero\s+(.+?)"
+        r"(?:,?\s*\bpara\s+(?=que\b|(?:no\s+)?[a-záéíóúüñ]+(?:ar|er|ir)\b)(.+?))?"
+        r"\s*\.?\s*$",
+        re.IGNORECASE | re.DOTALL,
+    ),
+}
+SUPPORTED_RULES_VERSIONS = frozenset(STATEMENT_RULES)
 SECTION_HEADER = re.compile(r"^###\s+(.+?)\s*#*\s*$", re.MULTILINE)
 UNRESOLVED_REASON = "no coincide con la plantilla de HU"
 PREAMBLE_REASON = "texto previo a la primera HU"
@@ -82,6 +93,10 @@ class NormalizeStage(StageBase):
         self._results = results
         self._config = config
         self._delimiter = re.compile(config.story_delimiter_pattern, re.MULTILINE)
+        try:
+            self._statement_rule = STATEMENT_RULES[config.rules_version]
+        except KeyError as exc:
+            raise ValueError(f"P1_RULES_VERSION no soportada: {config.rules_version}") from exc
 
     async def run(self, context: PipelineContext) -> StageResult:
         document = await self._load_document(context)
@@ -187,7 +202,7 @@ class NormalizeStage(StageBase):
     def _structure(self, block: _Block, *, number: int) -> UserStory | None:
         code = f"HU-{number:03d}"
         statement = _statement(block.text)
-        match = CANONICAL_STATEMENT.match(statement) if statement else None
+        match = self._statement_rule.match(statement) if statement else None
         if match is None:
             return None
         role, objective, benefit = (_clean(group) for group in match.groups())

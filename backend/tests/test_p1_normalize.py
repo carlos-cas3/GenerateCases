@@ -134,6 +134,55 @@ async def test_happy_path_structures_template_blocks(store, storage, results) ->
     assert result.warnings[1].details == {"HU-002": ["MISSING_BENEFIT"]}
 
 
+@pytest.mark.parametrize(
+    ("rules_version", "expected"),
+    [
+        (
+            "v1",
+            (
+                ("poder redactar recetas", "pacientes"),
+                ("que el sistema sea accesible", "los usuarios con permiso, para que no se filtren datos"),
+            ),
+        ),
+        (
+            "v2",
+            (
+                ("poder redactar recetas para pacientes", None),
+                ("que el sistema sea accesible para los usuarios con permiso", "que no se filtren datos"),
+            ),
+        ),
+    ],
+)
+async def test_rules_version_selects_statement_parser(
+    store, storage, results, rules_version: str, expected: tuple
+) -> None:
+    text = (
+        "## Recetas\n"
+        "Como médico, quiero poder redactar recetas para pacientes.\n\n"
+        "## Acceso\n"
+        "Como administrador, quiero que el sistema sea accesible para los usuarios con permiso, "
+        "para que no se filtren datos.\n"
+    )
+    context = _context()
+
+    result = await _stage(
+        store, storage, results, FakeDocumentExtractor([text]), rules_version=rules_version
+    ).run(context)
+
+    assert result.runtime_info["rules_version"] == rules_version
+    assert [(s.objective, s.benefit) for s in context.p1_output.user_stories] == list(expected)
+
+
+async def test_v2_detects_benefit_without_comma_before_infinitive(store, storage, results) -> None:
+    text = "## Análisis\nComo analista, quiero datos clínicos para poder analizarlos.\n"
+    context = _context()
+
+    await _stage(store, storage, results, FakeDocumentExtractor([text]), rules_version="v2").run(context)
+
+    story = context.p1_output.user_stories[0]
+    assert (story.objective, story.benefit) == ("datos clínicos", "poder analizarlos")
+
+
 async def test_persists_only_user_stories_with_rpc_payload(store, storage, results) -> None:
     context = _context()
     await _stage(store, storage, results, FakeDocumentExtractor([DOCUMENT])).run(context)

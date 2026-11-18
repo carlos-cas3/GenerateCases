@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.0, ge=0)
 
     # Configuración de P1 (camino B: heurística, sin LLM). Ver plantilla_hu.md (T-F4-02).
-    p1_rules_version: str = Field(default="v1", min_length=1)
+    p1_rules_version: str = Field(default="v2", min_length=1)
     p1_language: str = Field(default="es", min_length=1)
     p1_story_delimiter_pattern: str = Field(default=r"^##\s+.+$", min_length=1)
     p1_max_story_chars: int = Field(default=5000, gt=0)
