@@ -8,4 +8,4 @@ resultados_fases/
 
 # Datasets de calibración (datos de terceros, no se commitean)
 datasets/pyunml/raw/
-datasets/pyunml/calibration_doc.txt
+datasets/pyunml

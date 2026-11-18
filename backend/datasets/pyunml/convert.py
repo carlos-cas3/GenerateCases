@@ -13,8 +13,8 @@ Uso::
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-RAW = HERE / "raw" / "US24.txt"
-OUT = HERE / "calibration_doc.txt"
+RAW = HERE / "raw" / "US27.txt"
+OUT = HERE / "calibration_doc_U27.txt"
 
 
 def main() -> None:
