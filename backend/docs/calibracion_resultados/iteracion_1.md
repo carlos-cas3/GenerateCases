@@ -3,6 +3,11 @@
 > **Estado:** 🔲 pendiente. Primera ejecución del pipeline completo P1→P6 con el LLM real
 > (Fase 7, T-F7-08). Completar las secciones con los datos reales siguiendo
 > [`plantilla.md`](plantilla.md); no rellenar con valores estimados.
+>
+> **Es el paso final de la calibración** (§6 de [`guia_calibracion.md`](guia_calibracion.md)):
+> se ejecuta **después** de que P1, P2, P4 y P5 pasaron sus criterios en sus
+> [`bitacora/`](bitacora). No es el primer paso; los sondeos parciales con `stop_after` la
+> preceden.
 
 ## Cómo ejecutarla
 
