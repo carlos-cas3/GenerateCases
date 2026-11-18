@@ -1,79 +1,104 @@
 # Issue — P1 v3: léxico de marcadores de fin, prioridad y trazabilidad
 
-> **Estado:** propuesta / pendiente de implementar.
-> **Área:** `ai_service/pipeline/stages/p1_normalize.py`,
-> `ai_service/pipeline/contracts/p1.py`, `ai_service/pipeline/stages/__init__.py`.
-> **Prioridad:** media-alta — afecta a la calidad de `objective`/`benefit` de todas las HU.
-> **Depende de:** P1 v2 (`P1_RULES_VERSION=v2`, commit `61a4c63` + cambio en working tree).
-> **Decisión de despliegue:** v3 se implementa como versión **seleccionable**; el default sigue
-> siendo `v2` hasta que la evaluación anotada confirme la hipótesis.
-> **Estado de la evaluación:** bloqueada hasta disponer de 50–100 HU de desarrollo y 50–100 HU
-> de test anotadas a mano, de otra fuente distinta a `US24`.
+> **Estado:** pendiente de implementar.
+> **Prioridad:** media-alta — afecta la calidad de `objective`/`benefit` en todas las HU.
+> **Depende de:** P1 v2 en estado actual (`P1_RULES_VERSION=v2`, commit `61a4c63`).
+> **Default tras implementar:** sigue siendo `v2`; v3 se activa con `P1_RULES_VERSION=v3`.
+> **Evaluación:** bloqueada hasta tener anotaciones manuales sobre los corpus disponibles.
 
 ---
 
-## 1. Problema
+## Qué hay que hacer (resumen ejecutivo)
 
-P1 v2 solo reconoce `"para"` como introductor de beneficio cuando le sigue `"que"` o un
-infinitivo. Eso corrigió los cortes de v1 (`"para pacientes"`, `"para los usuarios…"`), pero deja
-como `MISSING_BENEFIT` beneficios expresados con otros marcadores:
+P1 v2 identifica el beneficio de una HU buscando `"para"` seguido de `"que"` o un infinitivo.
+Eso deja sin beneficio muchas HU que sí lo tienen, solo porque usan otro marcador como
+`"de modo que"` o `"con el fin de"`.
 
-- `"con el fin de que …"`
-- `"con el objetivo de …"`
-- `"con la finalidad de …"`
-- `"a fin de …"`
-- `"de modo que …"`
-- `"de manera que …"`
-- `"de forma que …"`
+La tarea es implementar **P1 v3** como una nueva versión seleccionable del parser. v3 amplía el
+léxico de marcadores reconocidos, registra cuál se usó y con qué fiabilidad, y lo hace sin tocar
+la base de datos ni cambiar el comportamiento de v1/v2.
 
-Además, cuando v2 sí reconoce `"para que …"`, el `goal` conserva el `"que"` inicial
-(`"que los datos no se filtren"`). v3 propone consumir el marcador completo y dejar el beneficio
-sin ese arrastre.
-
-El sondeo real de v2 sobre `calibration_doc.txt` (US24, 40 HU) dio 17 HU válidas y 23
-`MISSING_BENEFIT`; muchas son ausencias reales de beneficio, pero otras son marcadores que v2 no
-reconoce. No se sabe cuántas sin medir con anotaciones.
-
-También falta trazabilidad: hoy no se registra qué marcador se eligió, su fuerza ni qué
-candidatos se descartaron cuando había varios.
+Los pasos concretos están en §4.7. Los archivos que cambian están en §5. Las pruebas que deben
+pasar están en §6. El default **no cambia** hasta que la evaluación de §7 lo confirme.
 
 ---
 
-## 2. Hipótesis
+## Lectura previa obligatoria
 
-Ampliar el léxico con prioridad por niveles y consumir el marcador completo:
+Antes de tocar código, leer:
 
-1. Reduce los falsos `MISSING_BENEFIT`.
-2. No aumenta los objetivos cortados.
-3. No cambia `role` y mantiene o mejora `objective`/`benefit` frente a v2.
+- `ai_service/pipeline/stages/p1_normalize.py` — el parser actual; en particular `STATEMENT_RULES`,
+  `NormalizeStage._structure` y `NormalizeStage.run`.
+- `ai_service/pipeline/contracts/p1.py` — `UserStory`, `P1Output` y `to_rpc_payload`.
+- `ai_service/pipeline/stages/__init__.py` — `build_p1_config` y `SUPPORTED_RULES_VERSIONS`.
+- `tests/test_p1_normalize.py` — los tests de regresión de v1/v2 que no deben romperse.
+- `docs/prompts_fases/Fase 4/plantilla_hu.md` §2.1 — contrato de la declaración canónica.
 
-La hipótesis debe medirse contra v2 sobre el mismo corpus anotado. No se asume cierta.
+---
+
+## 1. Contexto del problema
+
+P1 v2 usa una sola regex que captura `(role, objective, benefit)` en un pase. El beneficio solo
+se activa cuando detecta `"para que"` o `"para"` + infinitivo. Cualquier otro marcador produce
+`benefit=null` y una incidencia `MISSING_BENEFIT`.
+
+El análisis de los tres corpus disponibles muestra marcadores que v2 no reconoce:
+
+- `"de modo que"` — frecuente en US21 (H11, H13, H18, H20, H23 y otros) y US24 (H7, H13,
+  H16, H22, H23, H25–H27, H34, H37).
+- `"con el fin de"` — aparece en US21 (H22, H77, H94).
+- `"porque"` — aparece en US21 (H31, H32, H33, H67) como justificación del autor; semántica
+  distinta al beneficio funcional, con riesgo alto de falso positivo.
+
+Además, cuando v2 reconoce `"para que"`, el beneficio conserva el `"que"` inicial
+(`"que haya menos discrepancias"`). v3 consume el marcador completo y devuelve solo
+`"haya menos discrepancias"`.
+
+Una parte significativa de los `MISSING_BENEFIT` son **ausencias reales** de beneficio, no
+marcadores no reconocidos. v3 no los eliminará todos; solo reducirá los falsos.
+
+| Documento | HU totales | Con beneficio explícito (est.) | Sin beneficio real (est.) |
+|---|---|---|---|
+| US21 | 115 | ~65 | ~50 |
+| US24 | 40 | ~18 | ~22 |
+| US27 | 34 | ~18 | ~16 |
+
+---
+
+## 2. Qué debe mejorar v3 (hipótesis a validar)
+
+1. Reducir los falsos `MISSING_BENEFIT` en los corpus disponibles.
+2. No aumentar los objetivos cortados (`objective_cut`).
+3. No cambiar `role`; mantener o mejorar `objective`/`benefit` respecto a v2.
+
+Son hipótesis, no certezas. La evaluación de §7 las confirma o refuta.
 
 ---
 
 ## 3. Alcance
 
-### Incluido
+### Dentro del alcance
 
-- Léxico de marcadores de fin en cuatro niveles.
-- Prioridad, desempate y descarte de solapamientos.
-- `benefit_marker`, `benefit_strength` y `other_markers` en `UserStory` (solo memoria).
-- Conteos en `generation_stages.runtime_info` de P1.
-- Parser puro y seleccionable por `rules_version` para evaluación offline.
-- Tests unitarios y de integración de P1.
-- Documentación de la versión v3 y de la evaluación pendiente.
+- Léxico de marcadores en cinco niveles (ver §4.1).
+- Algoritmo de selección con prioridad y desempate (ver §4.2).
+- Campos `benefit_marker`, `benefit_strength` y `other_markers` en `UserStory` (solo en memoria,
+  no se persisten).
+- Conteos de marcadores en `generation_stages.runtime_info` de P1.
+- Parser puro en `p1_statement.py`, invocable sin servidor ni Supabase.
+- Tests unitarios del parser y tests de integración de P1.
 
-### Fuera de alcance
+### Fuera del alcance
 
-- Ampliar el reconocimiento de rol/medio (`"en calidad de"`, `"necesito"`, `"deseo"`,
-  `"puedo"`).
+- Inferir beneficio por posición o por coma sin marcador explícito — los corpus confirman que ese
+  patrón no es consistente entre documentos.
+- Ampliar el reconocimiento de rol (`"en calidad de"`, `"necesito"`, `"deseo"`, `"puedo"`).
 - Segmentación de documentos sin `##` o sin declaración canónica.
 - Producir el estado `invalid` para HU mal formadas.
-- Persistir incidencias, fragmentos o marcadores por historia.
-- Validar atomicidad, uniformidad o unicidad de HU; eso es P2.
-- Cambiar prompts de P2/P6 o el contrato de esas etapas.
+- Persistir marcadores o incidencias por historia en la base de datos.
+- Validar atomicidad, uniformidad o unicidad de HU (eso es P2).
+- Cambiar prompts de P2/P6 ni su contrato.
 - Cambiar el default a v3 antes de la evaluación.
-- Inventar anotaciones o usar `US24` como test limpio.
+- Inventar anotaciones ni usar los corpus como test limpio antes de anotarlos.
 
 ---
 
@@ -81,38 +106,36 @@ La hipótesis debe medirse contra v2 sobre el mismo corpus anotado. No se asume 
 
 ### 4.1 Léxico y prioridad
 
-`strength` describe la fiabilidad del marcador, no la calidad del beneficio. Un marcador
-`weak` sigue produciendo una HU `valid`; solo indica que la relación means-end es menos segura.
+`strength` describe la fiabilidad del marcador como introductor de beneficio, no la calidad del
+beneficio en sí. Un marcador `weak` produce una HU `valid`; solo señala que la relación
+means-end es menos segura.
 
-| Nivel | Marcador | Fuerza | Consume | Notas |
+| Nivel | Marcador | Fuerza | Qué consume | Notas |
 |---|---|---|---|---|
-| 1 | `para que` | `strong` | `para que` | El beneficio empieza después de `que`. |
-| 2 | `con el fin de` | `strong` | conector + `que` si existe | También `con el fin de que`. |
+| 1 | `para que` | `strong` | `para que` | Beneficio empieza después de `que`. |
+| 2 | `con el fin de` | `strong` | conector + `que` si existe | También `con el fin de que`. Exige guarda (ver abajo). |
 | 2 | `con el objetivo de` | `strong` | conector + `que` si existe | También `con el objetivo de que`. |
 | 2 | `con la finalidad de` | `strong` | conector + `que` si existe | También `con la finalidad de que`. |
 | 2 | `a fin de` | `strong` | conector + `que` si existe | También `a fin de que`. |
-| 3 | `para` + infinitivo | `weak` | solo `para` | Admite `no` y enclíticos. |
-| 4 | `de modo que` | `weak` | conector completo | El beneficio empieza después de `que`. |
-| 4 | `de manera que` | `weak` | conector completo | El beneficio empieza después de `que`. |
-| 4 | `de forma que` | `weak` | conector completo | El beneficio empieza después de `que`. |
+| 3 | `para` + infinitivo | `weak` | solo `para` | Admite `no` y enclíticos. No captura nominales. |
+| 4 | `de modo que` | `weak` | conector completo | Frecuente en corpus. Expresa consecuencia, no siempre fin — medir `false_benefit`. |
+| 4 | `de manera que` | `weak` | conector completo | Beneficio empieza después de `que`. |
+| 4 | `de forma que` | `weak` | conector completo | Beneficio empieza después de `que`. |
+| 5 | `porque` | `weak` | solo `porque` | Riesgo alto de capturar justificaciones del autor, no beneficios funcionales. Ver §8. Implementar desactivado por default dentro de v3 hasta tener datos de evaluación. |
 
-Reglas de reconocimiento:
+**Reglas de reconocimiento:**
 
 - Sin distinguir mayúsculas/minúsculas; aceptar acentos y espacios repetidos.
 - Nivel 2 **exige** que después del conector venga `que` o un infinitivo. Sin esa guarda,
-  `"con el fin de lucro"` se tomaría como beneficio `"lucro"`.
-- Nivel 3 admite `no` opcional y enclíticos plurales/singulares:
-  - `para no perder`
-  - `para usarlas`
-  - `para revisarlo`
-  - `para enviarnos`
-- Nivel 3 **no** debe capturar complementos nominales:
-  - `para el administrador`
-  - `para los usuarios`
-  - `para pacientes`
+  `"con el fin de lucro"` produciría beneficio `"lucro"` — falso positivo.
+- Nivel 3 admite `no` opcional y enclíticos (`para no perder`, `para usarlas`, `para revisarlo`,
+  `para enviarnos`). **No** debe capturar complementos nominales (`para el administrador`,
+  `para los usuarios`, `para pacientes`).
 - Nivel 4 no debe capturar `"de modo"` ni `"de manera"` sin `"que"`.
+- Nivel 5 no tiene guarda de infinitivo porque en los corpus aparece seguido de texto nominal.
+  Por eso su riesgo de `false_benefit` es el más alto.
 
-Patrones de referencia (el implementador puede ajustarlos si los tests pasan):
+**Patrones de referencia** (ajustar si los tests pasan):
 
 ```regex
 # Nivel 1
@@ -127,52 +150,54 @@ Patrones de referencia (el implementador puede ajustarlos si los tests pasan):
 
 # Nivel 4
 \bde\s+(?:modo|manera|forma)\s+que\b
+
+# Nivel 5
+\bporque\b
 ```
 
-En nivel 2, si existe `que`, el marcador incluye `que`; si no, el marcador termina en `de` y el
-beneficio empieza en el infinitivo. En nivel 1 y 4 el marcador incluye `que`.
+En nivel 2: si existe `que`, el marcador lo incluye; si no, el marcador termina en `de` y el
+beneficio empieza en el infinitivo. En niveles 1 y 4 el marcador incluye `que`.
 
-### 4.2 Algoritmo
+### 4.2 Algoritmo de selección
 
-1. Extraer la declaración canónica como hoy: `"Como <rol>, quiero <resto>"`.
-2. Buscar todos los candidatos dentro de `<resto>`.
-3. Descartar candidatos sin texto útil después del marcador.
-4. Ordenar por `(nivel, -posición)`: gana el nivel más bajo; a igual nivel, el último.
-5. Descartar candidatos solapados con el elegido.
-6. `objective` = texto anterior al marcador elegido; limpiar separadores finales.
-7. `benefit` = texto posterior al marcador completo; limpiar separadores iniciales y punto final.
-8. Sin candidatos: `benefit=null`, `benefit_marker=null`, `benefit_strength=null` y
-   `MISSING_BENEFIT`.
+Aplicar sobre el texto `<resto>` (todo lo que sigue a `"Como <rol>, quiero "`):
 
-La prioridad manda sobre la posición: `"para que A, para B"` elige nivel 1 (`A`) aunque el nivel 3
-(`B`) esté más al final. El “último gana” aplica solo a empates del mismo nivel.
+1. Buscar todos los candidatos usando los patrones de §4.1.
+2. Descartar candidatos sin texto útil después del marcador.
+3. Ordenar por `(nivel, -posición)`: gana el nivel más bajo; a igual nivel, gana el último.
+4. Descartar candidatos solapados con el elegido.
+5. `objective` = texto antes del marcador elegido; eliminar separadores finales (`,`, `.`, `;`).
+6. `benefit` = texto después del marcador completo; eliminar separadores iniciales y punto final.
+7. Sin candidatos válidos: `benefit=null`, `benefit_marker=null`, `benefit_strength=null`,
+   emitir `MISSING_BENEFIT`.
 
-`other_markers` contiene las etiquetas normalizadas de todos los candidatos descartados, en orden
-de aparición y sin incluir el elegido. Si hay duplicados, se conservan.
+La prioridad manda sobre la posición: si hay `"para que A, para B"`, gana nivel 1 (`A`) aunque
+el nivel 3 (`B`) aparezca después. El "último gana" aplica solo a empates del mismo nivel.
 
-### 4.3 Ejemplos de comportamiento
+`other_markers` = etiquetas normalizadas de los candidatos descartados, en orden de aparición,
+sin incluir el elegido. Los duplicados se conservan.
 
-| Declaración | `objective` | `benefit` | Marcador | Fuerza |
-|---|---|---|---|---|
-| `Como cliente, quiero comparar precios para elegir la tienda más barata` | `comparar precios` | `elegir la tienda más barata` | `para` | weak |
-| `Como cliente, quiero comparar precios para que elija la tienda más barata` | `comparar precios` | `elija la tienda más barata` | `para que` | strong |
-| `Como gestor, quiero exportar datos con el fin de que otro equipo los analice` | `exportar datos` | `otro equipo los analice` | `con el fin de que` | strong |
-| `Como gestor, quiero exportar datos con el objetivo de evitar errores` | `exportar datos` | `evitar errores` | `con el objetivo de` | strong |
-| `Como usuario, quiero configurar el sistema de modo que tolere fallos` | `configurar el sistema` | `tolere fallos` | `de modo que` | weak |
-| `Como usuario, quiero configurar el sistema de modo que tolere fallos, para reducir caídas` | `configurar el sistema de modo que tolere fallos` | `reducir caídas` | `para` | weak |
-| `Como usuario, quiero revisar el informe para que no se filtren datos, para cumplir la norma` | `revisar el informe` | `no se filtren datos` | `para que` | strong |
-| `Como usuario, quiero guardar el archivo para el administrador` | `guardar el archivo para el administrador` | `null` | `null` | `null` |
-| `Como usuario, quiero revisar el informe para no perder datos` | `revisar el informe` | `no perder datos` | `para` | weak |
-| `Como usuario, quiero descargar reportes para usarlas en Excel` | `descargar reportes` | `usarlas en Excel` | `para` | weak |
-| `Como usuario, quiero registrar gastos con el fin de lucro` | `registrar gastos con el fin de lucro` | `null` | `null` | `null` |
+### 4.3 Comportamiento esperado
 
-Cambio semántico esperado: en `"para que …"`, v3 devuelve `goal="no se filtren datos"`; v2
-devuelve `goal="que no se filtren datos"`. Es intencional, pero impide comparar filas v2/v3 sin
-separarlas.
+Casos reales de los corpus:
 
-### 4.4 Contrato
+| Declaración | `objective` | `benefit` | Marcador | Fuerza | Fuente |
+|---|---|---|---|---|---|
+| `Como miembro de la facultad, quiero recopilar mis publicaciones en un único punto de acceso, de modo que pueda elevar el perfil de mi trabajo` | `recopilar mis publicaciones en un único punto de acceso` | `pueda elevar el perfil de mi trabajo` | `de modo que` | weak | US21-H11 |
+| `Como administrador de DB / IR, quiero ver la lista de suscriptores para un informe específico con el fin de investigar las quejas de informes faltantes` | `ver la lista de suscriptores para un informe específico` | `investigar las quejas de informes faltantes` | `con el fin de` | strong | US21-H22 |
+| `Como miembro de la facultad de Cornell, quiero que los elementos que he depositado aparezcan en los primeros lugares de Google, porque ese es mi boleto al estrellato` | `que los elementos que he depositado aparezcan en los primeros lugares de Google` | `ese es mi boleto al estrellato` | `porque` | weak | US21-H32 |
+| `Como administrador del sistema, quiero que todos los datos se almacenen en una base de datos central, para que haya menos discrepancias entre los departamentos` | `que todos los datos se almacenen en una base de datos central` | `haya menos discrepancias entre los departamentos` | `para que` | strong | US24-H6 |
+| `Como médico, quiero que las enfermeras solo tengan un control parcial sobre los registros médicos del paciente, para que no eliminen accidentalmente datos importantes` | `que las enfermeras solo tengan un control parcial sobre los registros médicos del paciente` | `no eliminen accidentalmente datos importantes` | `para que` | strong | US27-H17 |
+| `Como usuario, quiero guardar el archivo para el administrador` | `guardar el archivo para el administrador` | `null` | `null` | `null` | sintético |
+| `Como usuario, quiero registrar gastos con el fin de lucro` | `registrar gastos con el fin de lucro` | `null` | `null` | `null` | sintético |
 
-En `UserStory` (`contracts/p1.py`):
+**Cambio respecto a v2:** en `"para que …"`, v3 devuelve `benefit="haya menos discrepancias"`;
+v2 devolvía `benefit="que haya menos discrepancias"`. Es intencional. Al comparar resultados en
+la evaluación, separar las filas v2 de las v3.
+
+### 4.4 Contrato — cambios en `UserStory`
+
+Añadir a `UserStory` en `contracts/p1.py`:
 
 ```python
 benefit_marker: str | None = None
@@ -180,33 +205,33 @@ benefit_strength: Literal["strong", "weak"] | None = None
 other_markers: tuple[str, ...] = ()
 ```
 
-- Usar `tuple[str, ...]`, no `list`, porque el contrato es frozen (advertencia #1 del roadmap).
-- `benefit_marker` guarda la etiqueta literal normalizada: `"para que"`, `"con el fin de que"`,
-  `"para"`, `"de modo que"`, etc.
-- `benefit_strength` solo puede ser `"strong"`, `"weak"` o `None`.
-- Validaciones:
-  - `benefit_marker is None` ⇔ `benefit_strength is None`.
-  - Si hay `benefit_marker`, debe haber `benefit`.
-  - `other_markers` contiene candidatos descartados; si otra aparición del mismo marcador se
-    descartó, la etiqueta puede repetirse y coincidir con la elegida.
-- `to_rpc_payload()` no cambia: los campos nuevos no se persisten.
+Restricciones:
 
-### 4.5 Trazabilidad
+- Usar `tuple[str, ...]`, no `list` (el contrato es frozen — advertencia #1 del roadmap).
+- `benefit_marker` guarda la etiqueta literal normalizada: `"para que"`, `"con el fin de"`,
+  `"para"`, `"de modo que"`, `"porque"`, etc.
+- `benefit_strength` acepta solo `"strong"`, `"weak"` o `None`.
+- `benefit_marker is None` ⟺ `benefit_strength is None`.
+- Si `benefit_marker` tiene valor, `benefit` también debe tenerlo.
+- **`to_rpc_payload()` no cambia.** Los tres campos nuevos no se persisten en base de datos.
 
-`NormalizeStage.run` añade a `runtime_info`:
+### 4.5 Trazabilidad en `runtime_info`
+
+Añadir en `NormalizeStage.run`, dentro del dict que se pasa a `StageResult(runtime_info=…)`:
 
 ```json
 {
   "benefit_marker_counts": {
     "para que": 10,
-    "con el fin de que": 2,
+    "con el fin de": 2,
     "para": 5,
-    "de modo que": 4
+    "de modo que": 4,
+    "porque": 1
   },
   "benefit_strength_counts": {
     "strong": 12,
-    "weak": 9,
-    "none": 19
+    "weak": 10,
+    "none": 18
   },
   "discarded_marker_counts": {
     "de modo que": 3,
@@ -215,16 +240,17 @@ other_markers: tuple[str, ...] = ()
 }
 ```
 
-- Contar solo `user_stories`, no fragmentos.
-- Convertir `Counter` a `dict` ordenado para que el JSON sea determinista.
-- `rules_version` ya existe en `runtime_info`; no duplicarlo.
-- `generations.config_snapshot` **no** guarda `P1_RULES_VERSION` (verificado en
-  `services/generations.py:98`); no añadirlo allí. La fuente de verdad de la versión ejecutada es
-  `generation_stages.runtime_info` de P1.
+Reglas:
 
-### 4.6 Parser puro y versionado
+- Contar solo `user_stories`, no fragmentos no resueltos.
+- Convertir cada `Counter` a `dict` ordenado antes de asignarlo (para JSON determinista).
+- `rules_version` ya está en `runtime_info`; no duplicarlo.
+- **No** añadir `P1_RULES_VERSION` a `generations.config_snapshot` (`services/generations.py:98`).
+  La fuente de verdad de la versión ejecutada es `generation_stages.runtime_info` de P1.
 
-Crear `ai_service/pipeline/stages/p1_statement.py`:
+### 4.6 Nuevo archivo: `p1_statement.py`
+
+Crear `ai_service/pipeline/stages/p1_statement.py` con:
 
 ```python
 @dataclass(frozen=True)
@@ -241,226 +267,243 @@ def parse_statement(statement: str, rules_version: str) -> ParsedStatement | Non
     ...
 ```
 
-- Debe ser puro: sin base de datos, sin LLM, sin `PipelineContext`.
-- `v1` y `v2` conservan exactamente el comportamiento actual.
-- `v3` usa el algoritmo de §4.2.
-- `NormalizeStage._structure` llama a `parse_statement`; deja de aplicar la regex directamente.
-- `SUPPORTED_RULES_VERSIONS` incluye `v1`, `v2` y `v3`.
-- Mantener la validación de `build_p1_config` y el rechazo de versiones desconocidas.
+Requisitos del módulo:
 
-La función pura permite evaluar v1/v2/v3 offline con las mismas anotaciones, sin arrancar el
-servidor ni Supabase.
+- **Puro**: sin base de datos, sin LLM, sin `PipelineContext`.
+- `v1` y `v2` conservan el comportamiento actual exacto (mover la lógica desde `p1_normalize.py`,
+  no reescribirla).
+- `v3` implementa el algoritmo de §4.2.
+- `SUPPORTED_RULES_VERSIONS` incluye `"v1"`, `"v2"` y `"v3"`.
+- `NormalizeStage._structure` debe llamar a `parse_statement` en lugar de aplicar la regex
+  directamente.
+- Mantener la validación en `build_p1_config` que rechaza versiones desconocidas.
 
-### 4.7 Orden de implementación
+### 4.7 Pasos de implementación
 
-1. Crear `p1_statement.py` con v1/v2 movidos desde `p1_normalize.py` y tests de regresión.
-2. Añadir v3 al parser puro y sus tests unitarios.
-3. Añadir los campos al contrato y sus validaciones.
-4. Integrar el parser en `NormalizeStage`, rellenar los campos y los conteos de `runtime_info`.
-5. Añadir `v3` a `SUPPORTED_RULES_VERSIONS`; mantener el default en `v2`.
-6. Actualizar documentación y ejecutar la suite rápida.
-7. Si hay corpus, ejecutar la evaluación de §7; si no, dejar el issue como evaluación bloqueada.
+Seguir este orden para mantener la suite verde en cada paso:
 
-No cambiar `.env.example` ni el default de `Settings.p1_rules_version`. Para un sondeo manual se
-puede poner `P1_RULES_VERSION=v3` en el `.env` local, sin commitearlo.
+1. Crear `p1_statement.py` moviendo la lógica de v1/v2 desde `p1_normalize.py`. Verificar que
+   los tests de regresión de v1/v2 pasan sin cambios.
+2. Añadir v3 al parser puro con el algoritmo de §4.2. Escribir los tests unitarios de §6.1.
+3. Añadir `benefit_marker`, `benefit_strength` y `other_markers` a `UserStory` con sus
+   validaciones (§4.4).
+4. Modificar `NormalizeStage._structure` para llamar a `parse_statement` y rellenar los campos
+   nuevos. Añadir los conteos de §4.5 a `runtime_info`.
+5. Añadir `"v3"` a `SUPPORTED_RULES_VERSIONS`. Verificar que el default sigue siendo `"v2"`.
+6. Actualizar la documentación listada en §5. Ejecutar la suite completa.
+7. Si hay corpus anotado disponible, ejecutar la evaluación de §7. Si no, marcar el issue como
+   **implementado con evaluación bloqueada** y no cerrarlo como validado.
+
+**No modificar** `.env.example` ni el default de `Settings.p1_rules_version`. Para probar v3
+localmente: `P1_RULES_VERSION=v3` en el `.env` local, sin commitearlo.
 
 ---
 
 ## 5. Archivos que cambian
 
-| Archivo | Cambio |
+| Archivo | Qué hacer |
 |---|---|
-| `ai_service/pipeline/stages/p1_statement.py` | Nuevo: parser puro v1/v2/v3 y `SUPPORTED_RULES_VERSIONS`. |
-| `ai_service/pipeline/stages/p1_normalize.py` | Usa `parse_statement`; rellena campos nuevos; añade conteos a `runtime_info`. |
-| `ai_service/pipeline/contracts/p1.py` | Añade `benefit_marker`, `benefit_strength`, `other_markers` y validaciones. |
-| `ai_service/pipeline/stages/__init__.py` | Importa/expone la lista de versiones válidas; sin cambio de default. |
-| `tests/test_p1_statement.py` | Nuevo: unitarios del parser puro. |
-| `tests/test_p1_normalize.py` | Añade v3 al parametrizado de versiones, integración y `runtime_info`. |
-| `tests/test_stages_wiring.py` | Verifica que v3 es aceptada y que el default sigue siendo v2. |
-| `docs/prompts_fases/Fase 4/plantilla_hu.md` | §2.1 documenta v3. |
-| `docs/calibracion_resultados/bitacora/p1.md` | Nueva fila solo cuando haya sondeo real con v3. |
-| `docs/pipeline_roadmap.md` | Nota de v3 opt-in y evaluación pendiente. |
-| `scripts/evaluate_p1_v3.py` | Opcional: evaluación offline contra JSONL anotado. |
+| `ai_service/pipeline/stages/p1_statement.py` | **Crear.** Parser puro con v1, v2 y v3. Exportar `SUPPORTED_RULES_VERSIONS`. |
+| `ai_service/pipeline/stages/p1_normalize.py` | Reemplazar la regex inline por una llamada a `parse_statement`. Rellenar campos nuevos. Añadir conteos a `runtime_info`. |
+| `ai_service/pipeline/contracts/p1.py` | Añadir `benefit_marker`, `benefit_strength`, `other_markers` y sus validaciones a `UserStory`. No tocar `to_rpc_payload`. |
+| `ai_service/pipeline/stages/__init__.py` | Importar y exponer `SUPPORTED_RULES_VERSIONS` desde `p1_statement`. Sin cambio de default. |
+| `tests/test_p1_statement.py` | **Crear.** Tests unitarios del parser puro (casos de §6.1, incluidos casos reales de US21/US24/US27). |
+| `tests/test_p1_normalize.py` | Añadir v3 al parametrizado de versiones, tests de integración y verificación de `runtime_info`. |
+| `tests/test_stages_wiring.py` | Verificar que v3 es aceptada y que el default sigue siendo v2. |
+| `docs/prompts_fases/Fase 4/plantilla_hu.md` | Documentar v3 en §2.1. |
+| `docs/calibracion_resultados/bitacora/p1.md` | Añadir fila solo cuando haya un sondeo real ejecutado con v3. |
+| `docs/pipeline_roadmap.md` | Añadir nota de v3 opt-in y evaluación pendiente. |
+| `scripts/evaluate_p1_v3.py` | **Crear (opcional).** Script de evaluación offline contra JSONL anotado. |
 
-No se toca `supabase/schema.sql`, las RPC ni la tabla `user_stories`.
+**No tocar:** `supabase/schema.sql`, las RPC, la tabla `user_stories`, ni ningún archivo de
+migración.
 
 ---
 
 ## 6. Pruebas
 
-### 6.1 Parser puro
+La suite debe seguir verde con `python -m pytest -q`. Referencia actual: 544 passed,
+15 deselected. No correr integration/e2e/llm.
 
-| Caso | Resultado esperado |
+### 6.1 Tests unitarios del parser puro (`test_p1_statement.py`)
+
+| Entrada | Resultado esperado |
 |---|---|
-| `para que` | Marcador `"para que"`, strong, beneficio sin `"que"`. |
-| `con el fin de que` | Marcador completo, strong, sin arrastre de `"que"`. |
-| `con el objetivo de evitar` | Marcador `"con el objetivo de"`, strong, beneficio `"evitar"`. |
-| `con la finalidad de que` | Marcador completo, strong. |
-| `a fin de que` | Marcador completo, strong. |
-| `para no perder` | Marcador `"para"`, weak, beneficio `"no perder"`. |
-| `para usarlas` | Marcador `"para"`, weak, beneficio `"usarlas"`. |
-| `para revisarlo` | Marcador `"para"`, weak, beneficio `"revisarlo"`. |
-| `de modo que` | Marcador completo, weak. |
-| `de manera que` | Marcador completo, weak. |
-| `de forma que` | Marcador completo, weak. |
-| `para el administrador` | Sin beneficio, `MISSING_BENEFIT`. |
-| `para los usuarios` | Sin beneficio. |
-| `con el fin de lucro` | Sin beneficio. |
-| `a fin de cuentas` | Sin beneficio. |
-| Sin marcador | `benefit=null`, `benefit_strength=null`. |
-| Dos del mismo nivel | Gana el último. |
-| Nivel 1 antes que nivel 3 | Gana nivel 1. |
-| Nivel 4 antes que nivel 3 | Gana nivel 3. |
-| Candidato solapado | Se descarta el solapado. |
-| Marcador sin texto posterior | No es candidato. |
-| Mayúsculas, acentos, espacios repetidos y saltos de línea | Se reconocen igual. |
-| Punto final | Se elimina del `benefit`/`objective`. |
+| `"…para que haya menos discrepancias"` | Marcador `"para que"`, strong, benefit sin `"que"`. |
+| `"…con el fin de que otro equipo los analice"` | Marcador `"con el fin de que"`, strong. |
+| `"…con el objetivo de evitar errores"` | Marcador `"con el objetivo de"`, strong, benefit `"evitar errores"`. |
+| `"…con la finalidad de que se registre"` | Marcador `"con la finalidad de que"`, strong. |
+| `"…a fin de que se reduzcan los tiempos"` | Marcador `"a fin de que"`, strong. |
+| `"…para no perder datos"` | Marcador `"para"`, weak, benefit `"no perder datos"`. |
+| `"…para usarlas en Excel"` | Marcador `"para"`, weak, benefit `"usarlas en Excel"`. |
+| `"…para revisarlo más tarde"` | Marcador `"para"`, weak. |
+| `"…de modo que pueda elevar el perfil de mi trabajo"` | Marcador `"de modo que"`, weak. |
+| `"…de manera que se garantice la seguridad"` | Marcador `"de manera que"`, weak. |
+| `"…de forma que se procese correctamente"` | Marcador `"de forma que"`, weak. |
+| `"…porque ese es mi boleto al estrellato"` (US21-H32, con nivel 5 activo) | Marcador `"porque"`, weak. |
+| `"…para el administrador"` | Sin benefit, `MISSING_BENEFIT`. |
+| `"…para los usuarios"` | Sin benefit. |
+| `"…con el fin de lucro"` | Sin benefit. |
+| `"…a fin de cuentas"` | Sin benefit. |
+| Sin marcador (ej. US27-H6) | `benefit=null`, `benefit_marker=null`, `benefit_strength=null`. |
+| Dos marcadores del mismo nivel | Gana el último. |
+| Nivel 1 antes que nivel 3 en la misma declaración | Gana nivel 1. |
+| Nivel 4 antes que nivel 3 en la misma declaración | Gana nivel 3. |
+| Nivel 5 (`porque`) vs nivel 3 (`para` + infinitivo) | Gana nivel 3. |
+| Marcador solapado con el elegido | Se descarta el solapado. |
+| Marcador sin texto posterior | No es candidato válido. |
+| Mayúsculas, tildes, espacios repetidos y saltos de línea | Se reconocen igual. |
+| Punto final en benefit u objective | Se elimina. |
 
-### 6.2 Integración de P1
+### 6.2 Tests de integración de P1 (`test_p1_normalize.py`)
 
-- `UserStory` de v3 rellena `benefit_marker`, `benefit_strength` y `other_markers`.
-- `objective`/`benefit` coinciden con §4.3.
-- `runtime_info` contiene los tres conteos y `rules_version="v3"`.
-- `to_rpc_payload()` sigue devolviendo exactamente las mismas claves.
-- v1 y v2 producen los mismos resultados que antes (regresión).
-- `build_p1_config` acepta `v3` y sigue rechazando `v9`.
-- El default de `Settings.p1_rules_version` sigue siendo `v2`.
-- La suite rápida sigue verde:
+- Con `rules_version="v3"`, `UserStory` rellena `benefit_marker`, `benefit_strength` y
+  `other_markers`.
+- Los valores de `objective`/`benefit` coinciden con los ejemplos de §4.3.
+- `runtime_info` contiene `benefit_marker_counts`, `benefit_strength_counts`,
+  `discarded_marker_counts` y `rules_version="v3"`.
+- `to_rpc_payload()` devuelve exactamente las mismas claves que hoy, sin los campos nuevos.
+- Con `rules_version="v1"` y `"v2"`, los resultados son idénticos a los tests existentes
+  (regresión).
+- `build_p1_config` acepta `"v3"` y sigue rechazando `"v9"`.
+- El default de `Settings.p1_rules_version` sigue siendo `"v2"`.
 
-```bash
-python -m pytest -q
-```
+### 6.3 Tests de contrato (`test_p1_normalize.py` o `test_p1_statement.py`)
 
-Referencia actual: 544 passed, 15 deselected. No se ejecutan integration/e2e/llm.
-
-### 6.3 Contrato
-
-- `benefit_marker` sin `benefit` → error de validación.
-- `benefit_marker` sin `benefit_strength` → error.
-- `benefit_strength` sin `benefit_marker` → error.
-- `other_markers` no incluye el candidato elegido; una etiqueta repetida de otro candidato sí se
-  conserva.
-- `other_markers` es una tupla inmutable.
+- `benefit_marker` con valor pero `benefit=null` → error de validación de Pydantic.
+- `benefit_marker` con valor pero `benefit_strength=null` → error.
+- `benefit_strength` con valor pero `benefit_marker=null` → error.
+- `other_markers` no incluye el marcador elegido (sí puede incluir etiquetas repetidas de otros
+  candidatos descartados).
+- `other_markers` es una tupla, no una lista.
 
 ---
 
 ## 7. Evaluación
 
-### 7.1 Corpus
+La implementación puede completarse sin la evaluación. Lo que **no** puede hacerse sin ella es
+cambiar el default a v3 ni declarar v3 "mejor" que v2.
 
-- **Dev:** 50–100 HU anotadas a mano para ajustar la heurística.
-- **Test:** 50–100 HU anotadas de otra fuente/documento, no usadas durante el ajuste.
-- `calibration_doc.txt` (US24, 40 HU) **no** sirve como test: v1/v2 ya lo vieron y es pequeño.
-  Puede usarse como regresión/dev, nunca como test limpio.
-- Si no hay corpus, no se inventan anotaciones: la implementación y los tests pueden completarse,
-  pero la evaluación queda **bloqueada** y el default no cambia.
+### 7.1 Corpus disponibles
 
-Formato sugerido, una HU por línea:
+| Rol | Archivo | HU |
+|---|---|---|
+| Dev (ajuste) | `datasets/pyunml/calibration_doc_US21.txt` | 115 |
+| Test (medición final) | `datasets/pyunml/calibration_doc_US24.txt` | 40 |
+| Test (medición final) | `datasets/pyunml/calibration_doc_U27.txt` | 34 |
+
+Anotar US21 primero. No abrir US24/US27 hasta tener v3 ajustada con US21. Ninguno de los tres
+sirve como test limpio sin anotaciones manuales previas.
+
+### 7.2 Formato de anotación (JSONL, una HU por línea)
+
+HU con beneficio:
 
 ```json
-{"id":"dev-001","text":"Como cliente, quiero comparar precios para elegir la tienda más barata","role":"cliente","objective":"comparar precios","benefit":"elegir la tienda más barata","marker":"para","strength":"weak","notes":""}
+{"id":"US21-011","text":"Como miembro de la facultad, quiero recopilar fácilmente mis publicaciones en un único punto de acceso en línea, de modo que pueda elevar el perfil de mi trabajo","role":"miembro de la facultad","objective":"recopilar fácilmente mis publicaciones en un único punto de acceso en línea","benefit":"pueda elevar el perfil de mi trabajo","marker":"de modo que","strength":"weak","notes":""}
 ```
 
-Para HU sin beneficio:
+HU sin beneficio:
 
 ```json
-{"id":"dev-002","text":"Como usuario, quiero iniciar sesión","role":"usuario","objective":"iniciar sesión","benefit":null,"marker":null,"strength":null,"notes":"sin justificación"}
+{"id":"US27-006","text":"Como paciente, quiero poder renovar mis recetas de medicamentos","role":"paciente","objective":"poder renovar mis recetas de medicamentos","benefit":null,"marker":null,"strength":null,"notes":"sin justificación explícita"}
 ```
 
-### 7.2 Protocolo
+### 7.3 Protocolo
 
-1. Anotar primero el conjunto de desarrollo.
-2. Implementar y ajustar v3 solo con dev.
-3. Congelar la regla y los umbrales antes de abrir test.
-4. Ejecutar v2 y v3 sobre test una sola vez.
-5. Reportar resultados por versión, sin mezclar filas ni reajustar después de ver test.
+1. Anotar US21 manualmente.
+2. Implementar y ajustar v3 usando solo US21.
+3. Congelar la regla antes de abrir US24/US27.
+4. Ejecutar v2 y v3 sobre US24 + US27 una sola vez, llamando a `parse_statement` directamente.
+5. Reportar las métricas de §7.4 por versión. No reajustar después de ver los resultados de test.
 
-La evaluación debe llamar a `parse_statement` directamente. No requiere servidor, Supabase ni
-LLM.
-
-### 7.3 Métricas
+### 7.4 Métricas a reportar
 
 | Métrica | Definición |
 |---|---|
-| `role_exact` | `role` coincide tras normalizar. |
+| `role_exact` | `role` coincide tras normalizar (minúsculas, espacios colapsados). |
 | `objective_exact` | `objective` coincide tras normalizar. |
 | `benefit_exact` | `benefit` coincide, incluido `null`. |
-| `false_missing_benefit` | Anotación con beneficio y parser devuelve `null`. |
-| `false_benefit` | Anotación sin beneficio y parser devuelve texto. |
-| `objective_cut` | `objective` parseado más corto que el anotado por un marcador mal elegido. |
+| `false_missing_benefit` | Anotación tiene benefit pero el parser devuelve `null`. |
+| `false_benefit` | Anotación no tiene benefit pero el parser devuelve texto. |
+| `objective_cut` | `objective` parseado es más corto que el anotado por un marcador mal elegido. |
 | `marker_exact` | Marcador y fuerza coinciden con la anotación. |
 
-Normalización de comparación: minúsculas, espacios colapsados, sin punto final.
+Reportar `false_benefit` desglosado por marcador (`"porque"`, `"de modo que"`, resto) para
+decidir si nivel 5 se activa o se mantiene desactivado por default.
 
-### 7.4 Criterio de aceptación
+### 7.5 Criterio de aceptación
 
-En dev, v3 debe:
+En dev (US21), v3 debe:
 
-- Reducir `false_missing_benefit` frente a v2.
+- Reducir `false_missing_benefit` respecto a v2.
 - No aumentar `objective_cut`.
-- Mantener `role_exact` (la parte de rol no cambia).
+- Mantener `role_exact`.
 - Mejorar o igualar `benefit_exact`.
 
-En test, reportar los mismos valores sin reajustar. Si v3 no cumple, se queda como experimental y
-v2 sigue siendo el default.
-
-No se exige un umbral absoluto antes de tener datos; el umbral se fija en dev y se congela antes
-de test.
+En test (US24 + US27), reportar los mismos valores sin reajustar. Si v3 no cumple, se queda
+como versión experimental y v2 sigue siendo el default.
 
 ---
 
-## 8. Riesgos
+## 8. Riesgos a tener en cuenta
 
-- **`de modo que` expresa manera/consecuencia, no siempre fin.** Aceptarlo como weak puede
-  convertir advertencias en beneficios falsos. Medir `false_benefit`.
-- **Nivel 2 demasiado laxo.** Sin la guarda `que`/infinitivo, `"con el fin de lucro"` y similares
-  serían falsos positivos. La guarda es obligatoria.
-- **Prioridad frente a posición.** Un `para que` temprano gana a un `para` final aunque el segundo
-  sea más específico. Es la regla acordada; la evaluación dirá si perjudica.
-- **Cambio de `goal` al quitar `"que"`.** P2/P6 no deberían depender del `"que"`, pero conviene
-  una prueba de humo con una generación P1–P2 y otra P1–P6 antes de promover v3.
-- **Sobreajuste a US24.** Por eso US24 no es test y se exige otra fuente.
-- **Coste de anotación.** Sin corpus etiquetado no hay validación; no se debe declarar v3
-  “mejor” solo porque los tests unitarios pasan.
-- **Trazabilidad solo en memoria.** `benefit_marker`/`other_markers` no se persisten; la
-  comparación v2/v3 se hace offline con los JSONL, no consultando la BD.
+- **`"porque"` captura justificaciones del autor, no beneficios funcionales.** US21-H32
+  (`"porque ese es mi boleto al estrellato"`) y US21-H31 son los casos típicos. Implementar
+  el nivel 5 desactivado por default dentro de v3 y activarlo solo con un flag explícito hasta
+  tener datos de evaluación.
+- **`"de modo que"` expresa consecuencia, no siempre fin.** El riesgo de `false_benefit` es real,
+  especialmente en US24. Medir antes de promover.
+- **Nivel 2 sin la guarda produce falsos positivos.** `"con el fin de lucro"` → benefit `"lucro"`.
+  La guarda `que`/infinitivo es obligatoria.
+- **El cambio de benefit al quitar `"que"` puede afectar P2/P6.** Hacer una prueba de humo con
+  una generación P1–P2 y otra P1–P6 antes de promover v3 a default.
+- **Una bajada del total de `MISSING_BENEFIT` no confirma que v3 sea mejor.** Si también sube
+  `false_benefit`, puede ser peor. Medir ambos.
+- **`benefit_marker` y `other_markers` no se persisten.** La comparación v2/v3 se hace offline
+  con los JSONL anotados, no consultando la base de datos.
 
 ---
 
 ## 9. Criterios de cierre
 
-La implementación se considera terminada cuando:
+### La implementación está terminada cuando:
 
-- `v3` es seleccionable con `P1_RULES_VERSION=v3` y `v1`/`v2` siguen funcionando igual.
-- Los tests de §6 pasan y la suite rápida sigue verde.
-- `runtime_info` registra los conteos de marcadores, fuerza y descartados.
-- `to_rpc_payload()` no cambia y no hay migración.
-- El default sigue en `v2`.
-- La documentación de §5 está actualizada.
+- [ ] `P1_RULES_VERSION=v3` selecciona v3 y `v1`/`v2` producen los mismos resultados que antes.
+- [ ] Los tests de §6 pasan y `python -m pytest -q` sigue verde (referencia: 544 passed).
+- [ ] `runtime_info` incluye los tres conteos nuevos.
+- [ ] `to_rpc_payload()` no cambió y no hay migración de base de datos.
+- [ ] El default sigue en `v2`.
+- [ ] Los archivos de documentación de §5 están actualizados.
 
-La evaluación se considera cerrada solo cuando:
+### La evaluación está cerrada cuando:
 
-- Existe el corpus dev/test anotado de §7.1.
-- Se ejecutó v2 vs v3 con el protocolo de §7.2.
-- Se reportaron las métricas de §7.3.
-- Se decidió, con datos, si v3 pasa a default o se queda experimental.
+- [ ] US21 está anotado a mano y US24 + US27 están anotados.
+- [ ] Se ejecutó v2 vs v3 siguiendo el protocolo de §7.3.
+- [ ] Se reportaron las métricas de §7.4, incluido `false_benefit` desglosado por marcador.
+- [ ] Se decidió, con datos, si v3 pasa a default y si nivel 5 (`"porque"`) se activa.
 
-Mientras no exista corpus, el issue puede quedar como **implementado con evaluación bloqueada**;
-no se debe cerrar como validado.
+Mientras no existan anotaciones, el issue debe quedar como **implementado / evaluación bloqueada**.
+No cerrarlo como validado.
 
 ---
 
 ## 10. Referencias
 
-- `ai_service/pipeline/stages/p1_normalize.py` — reglas v1/v2, `_structure`, `runtime_info`.
-- `ai_service/pipeline/contracts/p1.py` — `UserStory`, `to_rpc_payload`.
-- `ai_service/pipeline/stages/__init__.py` — `build_p1_config`, versiones válidas.
-- `ai_service/config.py` — `p1_rules_version` (default `v2`).
-- `tests/test_p1_normalize.py` — regresiones v1/v2, payload, persistencia.
-- `tests/test_stages_wiring.py` — default y rechazo de versiones.
-- `docs/prompts_fases/Fase 4/plantilla_hu.md` §2.1 — contrato de la declaración canónica.
-- `docs/calibracion_resultados/bitacora/p1.md` — sondeos v1/v2 sobre US24.
-- `docs/calibracion_resultados/guia_calibracion.md` §5 — criterio de P1.
-- `docs/prompts_fases/Fase 3/pipeline_design.md` — P1, D-02, D-21, D-22.
-- `docs/pipeline_roadmap.md` — advertencia #5 y convención de `runtime_info`.
-- `supabase/schema.sql` — `persist_p1_user_stories` y columnas persistidas.
+| Recurso | Para qué |
+|---|---|
+| `datasets/pyunml/calibration_doc_US21.txt` | Corpus dev; 115 HU con la mayor variedad de marcadores. |
+| `datasets/pyunml/calibration_doc_US24.txt` | Corpus test; 40 HU. No abrir hasta ajustar con US21. |
+| `datasets/pyunml/calibration_doc_U27.txt` | Corpus test; 34 HU. No abrir hasta ajustar con US21. |
+| `ai_service/pipeline/stages/p1_normalize.py` | Parser actual (v1/v2), `_structure`, `runtime_info`. |
+| `ai_service/pipeline/contracts/p1.py` | `UserStory`, `P1Output`, `to_rpc_payload`. |
+| `ai_service/pipeline/stages/__init__.py` | `build_p1_config`, versiones válidas actuales. |
+| `ai_service/config.py` | `p1_rules_version` (default `v2`). |
+| `tests/test_p1_normalize.py` | Tests de regresión de v1/v2 que no deben romperse. |
+| `tests/test_stages_wiring.py` | Verificación de default y rechazo de versiones. |
+| `docs/prompts_fases/Fase 4/plantilla_hu.md` §2.1 | Contrato de la declaración canónica. |
+| `docs/calibracion_resultados/bitacora/p1.md` | Sondeos v1/v2 sobre US24. |
+| `docs/calibracion_resultados/guia_calibracion.md` §5 | Criterio de P1. |
+| `docs/prompts_fases/Fase 3/pipeline_design.md` | P1, D-02, D-21, D-22. |
+| `docs/pipeline_roadmap.md` | Advertencia #5 y convención de `runtime_info`. |
+| `supabase/schema.sql` | `persist_p1_user_stories` y columnas persistidas (no tocar). |
