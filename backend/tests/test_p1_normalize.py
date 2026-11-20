@@ -151,6 +151,13 @@ async def test_happy_path_structures_template_blocks(store, storage, results) ->
                 ("que el sistema sea accesible para los usuarios con permiso", "que no se filtren datos"),
             ),
         ),
+        (
+            "v3",
+            (
+                ("poder redactar recetas para pacientes", None),
+                ("que el sistema sea accesible para los usuarios con permiso", "no se filtren datos"),
+            ),
+        ),
     ],
 )
 async def test_rules_version_selects_statement_parser(
@@ -181,6 +188,83 @@ async def test_v2_detects_benefit_without_comma_before_infinitive(store, storage
 
     story = context.p1_output.user_stories[0]
     assert (story.objective, story.benefit) == ("datos clínicos", "poder analizarlos")
+
+
+V3_DOCUMENT = """## Publicaciones
+Como miembro de la facultad, quiero recopilar mis publicaciones en un único punto de acceso, de modo que pueda elevar el perfil de mi trabajo.
+
+## Suscriptores
+Como administrador de DB / IR, quiero ver la lista de suscriptores para un informe específico con el fin de investigar las quejas de informes faltantes.
+
+## Datos centrales
+Como administrador del sistema, quiero que todos los datos se almacenen en una base de datos central, para que haya menos discrepancias entre los departamentos.
+
+## Estrellato
+Como miembro de la facultad de Cornell, quiero que los elementos que he depositado aparezcan en los primeros lugares de Google, porque ese es mi boleto al estrellato.
+
+## Filtros
+Como analista, quiero filtrar datos, de modo que pueda revisarlos para corregir errores.
+"""
+
+
+async def test_v3_fills_marker_fields_and_runtime_counts(store, storage, results) -> None:
+    context = _context()
+
+    result = await _stage(store, storage, results, FakeDocumentExtractor([V3_DOCUMENT]), rules_version="v3").run(context)
+
+    stories = context.p1_output.user_stories
+    assert [(s.objective, s.benefit, s.benefit_marker, s.benefit_strength, s.other_markers) for s in stories] == [
+        (
+            "recopilar mis publicaciones en un único punto de acceso",
+            "pueda elevar el perfil de mi trabajo", "de modo que", "weak", (),
+        ),
+        (
+            "ver la lista de suscriptores para un informe específico",
+            "investigar las quejas de informes faltantes", "con el fin de", "strong", (),
+        ),
+        (
+            "que todos los datos se almacenen en una base de datos central",
+            "haya menos discrepancias entre los departamentos", "para que", "strong", (),
+        ),
+        (  # nivel 5 ("porque") desactivado por defecto dentro de v3
+            "que los elementos que he depositado aparezcan en los primeros lugares de Google, "
+            "porque ese es mi boleto al estrellato",
+            None, None, None, (),
+        ),
+        ("filtrar datos, de modo que pueda revisarlos", "corregir errores", "para", "weak", ("de modo que",)),
+    ]
+    assert [i.rule_code for i in stories[3].issues] == ["MISSING_BENEFIT"]
+
+    info = result.runtime_info
+    assert info["rules_version"] == "v3"
+    assert info["benefit_marker_counts"] == {"con el fin de": 1, "de modo que": 1, "para": 1, "para que": 1}
+    assert info["benefit_strength_counts"] == {"none": 1, "strong": 2, "weak": 2}
+    assert info["discarded_marker_counts"] == {"de modo que": 1}
+
+    # Los campos nuevos no se persisten: el payload de la RPC conserva las mismas claves.
+    payload = context.p1_output.to_rpc_payload()
+    assert {tuple(sorted(row)) for row in payload} == {
+        ("action", "code", "goal", "id", "original_text", "position", "role", "validation_status"),
+    }
+
+
+@pytest.mark.parametrize("rules_version", ["v1", "v2"])
+async def test_legacy_versions_report_no_markers(store, storage, results, rules_version: str) -> None:
+    context = _context()
+
+    result = await _stage(store, storage, results, FakeDocumentExtractor([DOCUMENT]), rules_version=rules_version).run(
+        context
+    )
+
+    assert all(s.benefit_marker is None and s.other_markers == () for s in context.p1_output.user_stories)
+    assert result.runtime_info["benefit_marker_counts"] == {}
+    assert result.runtime_info["benefit_strength_counts"] == {"none": 3}
+    assert result.runtime_info["discarded_marker_counts"] == {}
+
+
+def test_unknown_rules_version_is_rejected_by_stage(store, storage, results) -> None:
+    with pytest.raises(ValueError, match="P1_RULES_VERSION"):
+        _stage(store, storage, results, FakeDocumentExtractor([DOCUMENT]), rules_version="v9")
 
 
 async def test_persists_only_user_stories_with_rpc_payload(store, storage, results) -> None:

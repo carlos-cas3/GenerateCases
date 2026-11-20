@@ -1,7 +1,7 @@
 """Contratos de P1 — Procesamiento, segmentación y estructuración de HU (`pipeline_design.md`, P1)."""
 
 import re
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
@@ -65,7 +65,8 @@ class UserStory(ContractModel):
     """HU estructurada. La produce P1; la consumen P2 y P5. Tabla `user_stories`.
 
     `objective` → columna `action` y `benefit` → columna `goal` (D-02).
-    `normalized_text`, `issues` y `content_sections` no tienen columna.
+    `normalized_text`, `issues`, `content_sections`, `benefit_marker`, `benefit_strength` y
+    `other_markers` no tienen columna (solo en memoria; los tres últimos los rellena P1 v3).
     """
 
     id: UUID
@@ -74,6 +75,9 @@ class UserStory(ContractModel):
     role: str | None = None
     objective: str | None = None
     benefit: str | None = None
+    benefit_marker: str | None = None
+    benefit_strength: Literal["strong", "weak"] | None = None
+    other_markers: tuple[str, ...] = ()
     normalized_text: str | None = None
     validation_status: StoryValidationStatus
     issues: tuple[ValidationIssue, ...] = ()
@@ -90,6 +94,10 @@ class UserStory(ContractModel):
         for section in self.content_sections:
             if section.source_span is not None and section.source_span.user_story_code != self.code:
                 raise ValueError(f"la sección {section.kind!r} apunta a otra HU")
+        if (self.benefit_marker is None) != (self.benefit_strength is None):
+            raise ValueError("benefit_marker y benefit_strength deben venir juntos")
+        if self.benefit_marker is not None and not self.benefit:
+            raise ValueError("benefit_marker exige un benefit")
         return self
 
 

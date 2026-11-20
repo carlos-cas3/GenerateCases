@@ -267,6 +267,10 @@ Otros cierres pendientes:
    solo abre beneficio si `"para"` va seguido de `"que"` o un infinitivo, así que complementos
    como `"para pacientes"` o `"para los usuarios…"` ya no cortan el objetivo. `v1` se conserva
    para reproducir sondeos antiguos. Ver `plantilla_hu.md` §2.1 y `bitacora/p1.md`.
+   **P1 v3 (opt-in, 2026-11-20):** `P1_RULES_VERSION=v3` amplía el léxico de marcadores de
+   beneficio (`con el fin de`, `de modo que`, …) y registra marcador/fuerza en memoria y conteos en
+   `runtime_info`. El default sigue en `v2` hasta completar la evaluación con corpus anotados
+   (`prompts_fases/Fase 8/issue_v3_p1.md` §7); `"porque"` (nivel 5) queda desactivado.
 6. **Calibración de HDBSCAN pendiente** — `P4_MIN_CLUSTER_SIZE=2` / `P4_MIN_SAMPLES=1` son valores
    iniciales. Validar con documentos reales y ajustar por env var. Con muy pocos RF (≤3 en pruebas
    locales) HDBSCAN suele marcar todo como ruido → D-32 (`INSUFFICIENT_REQUIREMENTS`).

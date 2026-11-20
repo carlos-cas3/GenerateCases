@@ -1,6 +1,6 @@
 # Issue — P1 v3: léxico de marcadores de fin, prioridad y trazabilidad
 
-> **Estado:** pendiente de implementar.
+> **Estado:** implementado / evaluación bloqueada (2026-11-20) — falta anotar los corpus (§7).
 > **Prioridad:** media-alta — afecta la calidad de `objective`/`benefit` en todas las HU.
 > **Depende de:** P1 v2 en estado actual (`P1_RULES_VERSION=v2`, commit `61a4c63`).
 > **Default tras implementar:** sigue siendo `v2`; v3 se activa con `P1_RULES_VERSION=v3`.
@@ -469,12 +469,12 @@ como versión experimental y v2 sigue siendo el default.
 
 ### La implementación está terminada cuando:
 
-- [ ] `P1_RULES_VERSION=v3` selecciona v3 y `v1`/`v2` producen los mismos resultados que antes.
-- [ ] Los tests de §6 pasan y `python -m pytest -q` sigue verde (referencia: 544 passed).
-- [ ] `runtime_info` incluye los tres conteos nuevos.
-- [ ] `to_rpc_payload()` no cambió y no hay migración de base de datos.
-- [ ] El default sigue en `v2`.
-- [ ] Los archivos de documentación de §5 están actualizados.
+- [x] `P1_RULES_VERSION=v3` selecciona v3 y `v1`/`v2` producen los mismos resultados que antes.
+- [x] Los tests de §6 pasan y `python -m pytest -q` sigue verde (referencia: 544 passed).
+- [x] `runtime_info` incluye los tres conteos nuevos.
+- [x] `to_rpc_payload()` no cambió y no hay migración de base de datos.
+- [x] El default sigue en `v2`.
+- [x] Los archivos de documentación de §5 están actualizados.
 
 ### La evaluación está cerrada cuando:
 

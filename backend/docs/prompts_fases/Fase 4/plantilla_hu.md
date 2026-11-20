@@ -35,7 +35,7 @@ Como <rol>, quiero <objetivo/acción>, para <beneficio/meta>.
 | Elemento | Marcador | Patrón (regex) | Campo del contrato |
 |---|---|---|---|
 | Inicio de HU | línea que empieza con `## ` | `^##\s+.+$` → va a `P1Config.story_delimiter_pattern` | parte el documento en bloques |
-| Declaración canónica | primera línea no vacía tras el `##`, forma "Como X, quiero Y, para Z" | v1/v2 según `P1Config.rules_version` (ver §2.1) | `role`, `objective` (→ `action`), `benefit` (→ `goal`) |
+| Declaración canónica | primera línea no vacía tras el `##`, forma "Como X, quiero Y, para Z" | v1/v2/v3 según `P1Config.rules_version` (ver §2.1) | `role`, `objective` (→ `action`), `benefit` (→ `goal`) |
 | Sección de contenido | encabezado de nivel 3 `### ` | `^###\s+.+$` | `content_sections` (`kind` = título, `text` = cuerpo) |
 
 - `position` lo asigna P1 por orden de aparición (1, 2, 3…).
@@ -62,6 +62,25 @@ Como <rol>, quiero <objetivo/acción>, para <beneficio/meta>.
 
   Corrige esos casos: `"para pacientes"` queda dentro del objetivo y `"…acceso, para que no se
   filtren datos"` separa bien el beneficio. No reconoce `"de modo que"` como beneficio.
+
+- **`v3` (opt-in, evaluación pendiente)** — léxico de marcadores de fin con prioridad
+  (`Fase 8/issue_v3_p1.md`). Se activa con `P1_RULES_VERSION=v3`; el default sigue en `v2`.
+  La cabecera `^Como\s+(.+?),\s+quiero\s+(.+)$` separa el rol; en el resto se buscan marcadores:
+
+  | Nivel | Marcador | Fuerza | Guarda |
+  |---|---|---|---|
+  | 1 | `para que` | strong | — |
+  | 2 | `con el fin de`, `con el objetivo de`, `con la finalidad de`, `a fin de` (+ `que` opcional) | strong | exige `que` o infinitivo (`"con el fin de lucro"` no cuenta) |
+  | 3 | `para` + infinitivo (`no` y enclíticos admitidos) | weak | no captura nominales (`"para el administrador"`) |
+  | 4 | `de modo que`, `de manera que`, `de forma que` | weak | exige `que` |
+  | 5 | `porque` | weak | **desactivado** (solo `parse_statement(..., enable_porque=True)`) |
+
+  Gana el nivel más bajo; a igual nivel, el último. El marcador se consume completo, así que
+  `"para que haya…"` da `benefit="haya…"` (v2 daba `"que haya…"`). Cada `UserStory` lleva
+  `benefit_marker`, `benefit_strength` y `other_markers` (solo en memoria, no se persisten), y
+  `runtime_info` de P1 incluye `benefit_marker_counts`, `benefit_strength_counts` y
+  `discarded_marker_counts`. El parser vive en `ai_service/pipeline/stages/p1_statement.py`
+  (puro, invocable sin servidor ni Supabase).
 
 ---
 

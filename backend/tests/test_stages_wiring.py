@@ -13,6 +13,7 @@ from ai_service.clients.embeddings import EmbeddingsResponse
 from ai_service.clients.embeddings_fake import FakeEmbeddingsClient
 from ai_service.clients.extractor_fake import FakeDocumentExtractor
 from ai_service.clients.llm_fake import FakeLlmClient
+from ai_service.config import Settings
 from ai_service.core.errors import ClusteringError, ConfigurationError
 from ai_service.main import create_app
 from ai_service.pipeline.stages import (
@@ -112,6 +113,12 @@ def test_build_p2_config_requires_llm_model() -> None:
 def test_build_p1_config_rejects_unknown_rules_version() -> None:
     with pytest.raises(ConfigurationError, match="P1_RULES_VERSION"):
         build_p1_config(make_settings(p1_rules_version="v9"))
+
+
+def test_build_p1_config_accepts_v3_and_default_stays_v2() -> None:
+    assert build_p1_config(make_settings(p1_rules_version="v3")).rules_version == "v3"
+    assert build_p1_config(make_settings()).rules_version == "v2"
+    assert Settings.model_fields["p1_rules_version"].default == "v2"
 
 
 def test_build_configs_from_settings() -> None:

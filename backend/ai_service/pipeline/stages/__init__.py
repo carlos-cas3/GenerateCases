@@ -19,7 +19,8 @@ from ai_service.pipeline.contracts.p6 import P6Config
 from ai_service.pipeline.prompts.p2 import resolve_p2_prompt
 from ai_service.pipeline.prompts.p6 import resolve_p6_prompt
 from ai_service.pipeline.stages.base import StageBase, StageError, StageResult, StubStage
-from ai_service.pipeline.stages.p1_normalize import NormalizeStage, NormalizeStubStage, SUPPORTED_RULES_VERSIONS
+from ai_service.pipeline.stages.p1_normalize import NormalizeStage, NormalizeStubStage
+from ai_service.pipeline.stages.p1_statement import SUPPORTED_RULES_VERSIONS
 from ai_service.pipeline.stages.p2_requirements import RequirementsStage, RequirementsStubStage
 from ai_service.pipeline.stages.p3_embeddings import EmbeddingsStage, EmbeddingsStubStage
 from ai_service.pipeline.stages.p4_clustering import ClusteringStage, ClusteringStubStage
@@ -202,6 +203,7 @@ __all__ = [
     "build_p4_config",
     "build_p5_config",
     "build_p6_config",
+    "SUPPORTED_RULES_VERSIONS",
     "build_llm_settings",
     "STUB_STAGE_CLASSES",
     "PENDING_STUB_STAGE_CLASSES",

@@ -14,6 +14,7 @@ Implementa la plantilla `docs/prompts_fases/Fase 4/plantilla_hu.md` (versionada 
 import logging
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass
 from typing import ClassVar
 from uuid import uuid4
@@ -35,29 +36,15 @@ from ai_service.pipeline.contracts.p1 import (
     ValidationIssue,
 )
 from ai_service.pipeline.stages.base import StageBase, StageError, StageResult, StubStage
+from ai_service.pipeline.stages.p1_statement import SUPPORTED_RULES_VERSIONS, parse_statement
 from ai_service.repositories.documents import DocumentsRepository
 from ai_service.repositories.pipeline_results import PipelineResultsRepository
 from ai_service.schemas.generations import StageKey, StageWarning
 
 logger = logging.getLogger(__name__)
 
-# Declaración canónica de `plantilla_hu.md` §2, versionada por `P1Config.rules_version`.
-# - v1: parte en el primer "para" (legado; corta complementos como "para pacientes").
-# - v2: un "para" solo introduce el beneficio si le sigue "que" o un infinitivo, y `\b` antes
-#   de "para" evita partir palabras que lo contienen ("comparar", "separar").
-STATEMENT_RULES: dict[str, re.Pattern[str]] = {
-    "v1": re.compile(
-        r"^Como\s+(.+?),\s+quiero\s+(.+?)(?:,?\s*\bpara\s+(.+?))?\s*\.?\s*$",
-        re.IGNORECASE | re.DOTALL,
-    ),
-    "v2": re.compile(
-        r"^Como\s+(.+?),\s+quiero\s+(.+?)"
-        r"(?:,?\s*\bpara\s+(?=que\b|(?:no\s+)?[a-záéíóúüñ]+(?:ar|er|ir)\b)(.+?))?"
-        r"\s*\.?\s*$",
-        re.IGNORECASE | re.DOTALL,
-    ),
-}
-SUPPORTED_RULES_VERSIONS = frozenset(STATEMENT_RULES)
+# La declaración canónica (`plantilla_hu.md` §2) la estructura el parser puro `p1_statement`,
+# versionado por `P1Config.rules_version` (v1, v2, v3).
 SECTION_HEADER = re.compile(r"^###\s+(.+?)\s*#*\s*$", re.MULTILINE)
 UNRESOLVED_REASON = "no coincide con la plantilla de HU"
 PREAMBLE_REASON = "texto previo a la primera HU"
@@ -93,10 +80,8 @@ class NormalizeStage(StageBase):
         self._results = results
         self._config = config
         self._delimiter = re.compile(config.story_delimiter_pattern, re.MULTILINE)
-        try:
-            self._statement_rule = STATEMENT_RULES[config.rules_version]
-        except KeyError as exc:
-            raise ValueError(f"P1_RULES_VERSION no soportada: {config.rules_version}") from exc
+        if config.rules_version not in SUPPORTED_RULES_VERSIONS:
+            raise ValueError(f"P1_RULES_VERSION no soportada: {config.rules_version}")
 
     async def run(self, context: PipelineContext) -> StageResult:
         document = await self._load_document(context)
@@ -125,6 +110,7 @@ class NormalizeStage(StageBase):
                 "valid_count": output.valid_count,
                 "warning_count": output.warning_count,
                 "invalid_count": output.invalid_count,
+                **_marker_counts(output),
             },
         )
 
@@ -202,12 +188,10 @@ class NormalizeStage(StageBase):
     def _structure(self, block: _Block, *, number: int) -> UserStory | None:
         code = f"HU-{number:03d}"
         statement = _statement(block.text)
-        match = self._statement_rule.match(statement) if statement else None
-        if match is None:
+        parsed = parse_statement(statement, self._config.rules_version) if statement else None
+        if parsed is None:
             return None
-        role, objective, benefit = (_clean(group) for group in match.groups())
-        if not role or not objective:
-            return None
+        benefit = parsed.benefit
 
         issues: list[ValidationIssue] = []
         if not benefit:
@@ -233,9 +217,12 @@ class NormalizeStage(StageBase):
             id=uuid4(),
             code=code,
             original_text=block.text,
-            role=role,
-            objective=objective,
+            role=parsed.role,
+            objective=parsed.objective,
             benefit=benefit,
+            benefit_marker=parsed.benefit_marker,
+            benefit_strength=parsed.benefit_strength,
+            other_markers=parsed.other_markers,
             normalized_text=" ".join(statement.split()),
             validation_status=StoryValidationStatus.VALID_WITH_WARNINGS if issues else StoryValidationStatus.VALID,
             issues=tuple(issues),
@@ -311,11 +298,24 @@ def _section_kind(title: str) -> str:
     return "_".join(words) or "seccion"
 
 
-def _clean(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = " ".join(value.split()).strip(" ,.;")
-    return cleaned or None
+def _marker_counts(output: P1Output) -> dict[str, dict[str, int]]:
+    """Trazabilidad de marcadores de beneficio (`issue_v3_p1.md` §4.5). Solo cuenta `user_stories`.
+
+    En v1/v2 no se registran marcadores: todas las HU cuentan como `none`.
+    """
+    markers: Counter[str] = Counter()
+    strengths: Counter[str] = Counter()
+    discarded: Counter[str] = Counter()
+    for story in output.user_stories:
+        if story.benefit_marker is not None:
+            markers[story.benefit_marker] += 1
+        strengths[story.benefit_strength or "none"] += 1
+        discarded.update(story.other_markers)
+    return {
+        "benefit_marker_counts": dict(sorted(markers.items())),
+        "benefit_strength_counts": dict(sorted(strengths.items())),
+        "discarded_marker_counts": dict(sorted(discarded.items())),
+    }
 
 
 class NormalizeStubStage(StubStage):
